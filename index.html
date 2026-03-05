@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang='en'><head><meta name="robots" content="noindex, nofollow"><meta charset='UTF-8'/><meta name='viewport' content='width=device-width,initial-scale=1.0'/><title>ONN Scheduler</title><script crossorigin src='https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js'></script><script crossorigin src='https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js'></script><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}</style></head><body><div id='root'></div><script>const {
+<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'/><meta name='viewport' content='width=device-width,initial-scale=1.0'/><title>ONN Scheduler</title><script crossorigin src='https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js'></script><script crossorigin src='https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js'></script><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}</style></head><body><div id='root'></div><script>const {
   useState,
   useEffect,
   useContext,
@@ -524,6 +524,11 @@ const StorageAdapter = (() => {
 // ─── KEYS / HELPERS ─────────────────────────────────────────────────────────
 const TEAM_KEY = "onn_team_v2";
 const SETTINGS_KEY = "onn_settings_v1";
+// Tracks the highest ID ever issued so deleting a member never lets a new one
+// inherit that ID and silently remap historical schedule data to the wrong person.
+const NEXT_ID_KEY = "onn_team_nextid_v1";
+async function loadNextId() { return await StorageAdapter.get(NEXT_ID_KEY); }
+async function saveNextId(n) { await StorageAdapter.set(NEXT_ID_KEY, n); }
 
 async function loadTeam() {
   return await StorageAdapter.get(TEAM_KEY);
@@ -732,8 +737,12 @@ async function loadWeekWithCarryover(ws, teamOnns = ONNs) {
 	const baseWeek =
 	  stored && typeof stored === "object" ? stored : buildDefault(teamOnns);
 
-	const hydrated = hydrateWeekData(baseWeek, teamOnns);
-  const withCarry = await applyVacationCarryover(ws, hydrated, teamOnns);
+const hydrated = hydrateWeekData(baseWeek, teamOnns);
+  // If this week has been explicitly saved by any user, trust it as-is.
+  // Carryover is only for pre-filling weeks nobody has touched yet.
+  const withCarry = hasUserSavedMeta
+    ? hydrated
+    : await applyVacationCarryover(ws, hydrated, teamOnns);
 
   return { data: withCarry, existed: !!stored?._meta?.userSaved };
 }
@@ -867,16 +876,6 @@ const TeamCtx = createContext(ONNs);
 const ThemeCtx = createContext(false);
 const useTheme = () => useContext(ThemeCtx);
 const useTeam = () => useContext(TeamCtx);
-
-// ─── PRINT CSS ────────────────────────────────────────────────────────────────
-
-const PRINT_CSS = `
-@media print {
-  body * { visibility: hidden !important; }
-  #print-area, #print-area * { visibility: visible !important; }
-  #print-area { position:fixed; inset:0; padding:20px; background:#fff; overflow:visible; }
-  @page { margin:1cm; size: A4 landscape; }
-}`;
 
 // ─── STYLE CONSTANTS ─────────────────────────────────────────────────────────
 
@@ -1128,10 +1127,11 @@ function VacCoveragePanel({
   editable,
   onSlotChange,
   forceOpen = false,
-  onDone
+  onDone,
+  awayIds = new Set()
 }) {
   const [expanded, setExpanded] = useState(false);
-  const ONNs = useTeam();
+  const ONNs = useTeam().filter(o => !awayIds.has(o.id));
   const lm = useTheme();
   const dc = slot.docCoverage || {};
   if (onn.primary.length === 0) return null;
@@ -1667,7 +1667,8 @@ function CompactCoverageText({
   onSlotChange,
   openSignal = 0,
   onEditVacation = () => {},
-  rowDate = ""
+  rowDate = "",
+  awayIds = new Set()
 }) {
   const isVacation = slot.status === STATUS.VACATION;
   return /*#__PURE__*/React.createElement(React.Fragment, null,
@@ -1697,11 +1698,12 @@ function CompactCoverageText({
       editorOnly: true,
       defaultDate: rowDate
     }),
-    /*#__PURE__*/React.createElement(VacCoveragePanel, {
+/*#__PURE__*/React.createElement(VacCoveragePanel, {
       onn: onn,
       slot: slot,
       editable: editable,
-      onSlotChange: onSlotChange
+      onSlotChange: onSlotChange,
+      awayIds: awayIds
     })
   );
 }
@@ -1715,6 +1717,7 @@ function StaffRow({
   isSingle,
   density = 3,
   onNoteChange,
+  awayIds = new Set(),
   dragCoverage = null,
   isDropTarget = false,
   onCoverageDragStart = () => {},
@@ -2172,7 +2175,7 @@ function StaffRow({
       fontStyle: "italic",
       order: 99
     }
-  }, "📝 ", slot.note), density === 3 && away && !onn.floater && isSingle && !showCollapsedCoverage && /*#__PURE__*/React.createElement(CompactCoverageText, {
+}, "📝 ", slot.note), density === 3 && away && !onn.floater && isSingle && !showCollapsedCoverage && /*#__PURE__*/React.createElement(CompactCoverageText, {
     onn: onn,
     slot: slot,
     ONNs: ONNs,
@@ -2180,7 +2183,8 @@ function StaffRow({
     onSlotChange: onSlotChange,
     openSignal: vacEditSignal,
     onEditVacation: () => setVacEditSignal(v => v + 1),
-    rowDate: rowDate
+    rowDate: rowDate,
+    awayIds: awayIds
   }), density === 3 && away && !onn.floater && isSingle && showCollapsedCoverage && expanded && /*#__PURE__*/React.createElement(CompactCoverageText, {
     onn: onn,
     slot: slot,
@@ -2189,7 +2193,8 @@ function StaffRow({
     onSlotChange: onSlotChange,
     openSignal: vacEditSignal,
     onEditVacation: () => setVacEditSignal(v => v + 1),
-    rowDate: rowDate
+    rowDate: rowDate,
+    awayIds: awayIds
   }), density < 3 && density >= 1 && away && !onn.floater && isSingle && expanded && /*#__PURE__*/React.createElement(React.Fragment, null, editable && slot.status === STATUS.VACATION && /*#__PURE__*/React.createElement("button", {
     onClick: e => {
       e.stopPropagation();
@@ -2214,11 +2219,12 @@ function StaffRow({
     openSignal: vacEditSignal,
     editorOnly: true,
     defaultDate: rowDate
-  }), /*#__PURE__*/React.createElement(VacCoveragePanel, {
+}), /*#__PURE__*/React.createElement(VacCoveragePanel, {
     onn: onn,
     slot: slot,
     editable: editable,
-    onSlotChange: onSlotChange
+    onSlotChange: onSlotChange,
+    awayIds: awayIds
   })), showWeekAwayToggle && expanded && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: "4px",
@@ -2252,13 +2258,14 @@ function StaffRow({
     openSignal: vacEditSignal,
     editorOnly: true,
     defaultDate: rowDate
-  }), /*#__PURE__*/React.createElement(VacCoveragePanel, {
+}), /*#__PURE__*/React.createElement(VacCoveragePanel, {
     onn: onn,
     slot: slot,
     editable: showWeekAssignmentTools && editable,
     onSlotChange: onSlotChange,
     forceOpen: showWeekAssignmentTools,
-    onDone: () => setExpanded(false)
+onDone: () => setExpanded(false),
+    awayIds: awayIds
   })), isSingle && density >= 2 && !away && incomingExpanded && /*#__PURE__*/React.createElement(IncomingCoverageBadges, {
     items: incomingCoverage
   }), !isSingle && density >= 2 && !away && incomingExpanded && /*#__PURE__*/React.createElement(IncomingCoverageBadges, {
@@ -2734,12 +2741,14 @@ function DayCard({
       gridTemplateColumns: isSingle ? "1fr 1fr" : undefined,
       alignContent: "start"
     }
-  }, combinedVisibleRows.map((onn, i) => /*#__PURE__*/React.createElement(StaffRow, {
-    key: onn.id,
-    onn: onn,
-    slot: getSlot(dayData, onn.id),
-    editable: editable,
-    zebra: isSingle ? Math.floor(i / 2) % 2 !== 0 : i % 2 !== 0,
+}, (() => {
+    const awayIds = new Set(ONNs.filter(o => isAway(getSlot(dayData, o.id).status)).map(o => o.id));
+    return combinedVisibleRows.map((onn, i) => /*#__PURE__*/React.createElement(StaffRow, {
+      key: onn.id,
+      onn: onn,
+      slot: getSlot(dayData, onn.id),
+      editable: editable,
+      zebra: isSingle ? Math.floor(i / 2) % 2 !== 0 : i % 2 !== 0,
     isSingle: isSingle,
     density: isSingle && onn.floater ? 3 : density,
     incomingCoverage: incomingMap[onn.id] || [],
@@ -2760,13 +2769,15 @@ function DayCard({
     rowExpandValue: rowExpandValue,
     dropRevealSignal: dropRevealSignal,
     dropRevealOnnId: dropRevealOnnId,
-    rowDate: date,
-    onNoteChange: note => onSlotChange(onn.id, {
-      ...getSlot(dayData, onn.id),
-      note
-    }),
-    onRemoveFloater: removeFloaterFromDay
-  })), isSingle && (() => {
+	rowDate: date,
+		onNoteChange: note => onSlotChange(onn.id, {
+		  ...getSlot(dayData, onn.id),
+		  note
+		}),
+		onRemoveFloater: removeFloaterFromDay,
+		awayIds: awayIds
+	  }));
+	  })(), isSingle && (() => {
     const totalRows = combinedVisibleRows.length;
     if (totalRows % 2 === 0) return null;
     const zebra = Math.floor(totalRows / 2) % 2 !== 0;
@@ -2926,11 +2937,11 @@ function PrintView({
       overflow: "auto",
       padding: "28px"
     }
-  }, /*#__PURE__*/React.createElement("style", null, PRINT_CSS), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: "10px",
-      marginBottom: "18px",
+}, /*#__PURE__*/React.createElement("div", {
+  style: {
+    display: "flex",
+    gap: "10px",
+    marginBottom: "18px",
       flexShrink: 0,
       alignItems: "center",
       flexWrap: "wrap",
@@ -2987,7 +2998,29 @@ function PrintView({
   }, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map(d => /*#__PURE__*/React.createElement("option", {
     key: d
   }, d))), /*#__PURE__*/React.createElement("button", {
-    onClick: () => window.print(),
+onClick: () => {
+  const content = document.getElementById("print-area").innerHTML;
+  const win = window.open("", "_blank");
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #fff; }
+      table { width: 100%; border-collapse: collapse; font-size: 10px; }
+      th, td { padding: 5px 8px; border: 1px solid #e2e8f0; vertical-align: top; }
+		thead tr { background: #1e293b; color: #fff; }
+          /* Darken all muted text colors for print legibility */
+          * { color: #1e293b !important; }
+          thead tr * { color: #fff !important; }
+          [style*="color: rgb(148"] { color: #475569 !important; }
+          i, em, span[style*="italic"] { color: #334155 !important; }
+          @page { margin: 0.5cm; size: A4 landscape; }
+    </style>
+  </head><body>${content}</body></html>`);
+  win.document.close();
+  win.focus();
+  win.print();
+  win.close();
+},
     style: {
       ...PRI_BTN,
       fontSize: "13px",
@@ -3607,13 +3640,20 @@ function MonthBtn({
 }
 function EmbeddedTeamManager({
   onns,
-  onSave
+  onSave,
+  nextId: nextIdProp = 0
 }) {
   const lm = useTheme();
   const [list, setList] = React.useState(sortONNs(normalizeTeam(onns).map(o => ({
     ...o,
     primary: [...o.primary]
   }))));
+  // High-water mark: start from the prop (loaded from storage), falling back to
+  // max current ID + 1 for first-run / migration safety.
+  const [localNextId, setLocalNextId] = React.useState(() => {
+    const maxFromList = onns.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
+    return nextIdProp > 0 ? nextIdProp : maxFromList + 1;
+  });
   const [newName, setNewName] = React.useState("");
   const [newDocs, setNewDocs] = React.useState("");
   const [newFloat, setNewFloat] = React.useState(false);
@@ -3644,22 +3684,23 @@ function EmbeddedTeamManager({
       setConfirmDeleteId(null);
     } else setConfirmDeleteId(id);
   };
-  const addOnn = () => {
-    if (!newName.trim()) return;
-    const maxId = list.reduce((m, o) => Math.max(m, o.id), 0);
-    setList(l => sortONNs([...l, {
-      id: maxId + 1,
-      name: newName.trim(),
-      floater: newFloat,
-      orienting: false,
-      primary: newFloat ? [] : newDocs.split(",").map(d => d.trim()).filter(Boolean),
-      defaults: {}
-    }]));
-    setNewName("");
-    setNewDocs("");
-    setNewFloat(false);
-  };
-  const handleSaveTeam = () => onSave(sortONNs(normalizeTeam(list)));
+const addOnn = () => {
+  if (!newName.trim()) return;
+  const newId = localNextId;
+  setLocalNextId(n => n + 1);
+  setList(l => sortONNs([...l, {
+    id: newId,
+    name: newName.trim(),
+    floater: newFloat,
+    orienting: false,
+    primary: newFloat ? [] : newDocs.split(",").map(d => d.trim()).filter(Boolean),
+    defaults: {}
+  }]));
+  setNewName("");
+  setNewDocs("");
+  setNewFloat(false);
+};
+  const handleSaveTeam = () => onSave(sortONNs(normalizeTeam(list)), localNextId);
   const inputStyle = {
     padding: "5px 9px",
     borderRadius: "7px",
@@ -4118,7 +4159,8 @@ function SettingsModal({
   weekData,
   weekStart,
   deptName,
-  setDeptName
+  setDeptName,
+  nextId
 }) {
   const lm = lightMode;
   const [tab, setTab] = React.useState("team");
@@ -4275,12 +4317,13 @@ function SettingsModal({
       padding: "16px 24px 24px"
     }
   }, tab === "team" ? /*#__PURE__*/React.createElement(EmbeddedTeamManager, {
-    onns: onns,
-    onSave: list => {
-      onSave(list);
-      closeWithoutSavingPrefs();
-    }
-  }) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  onns: onns,
+  nextId: nextId,
+  onSave: (list, newNextId) => {
+    onSave(list, newNextId);
+    closeWithoutSavingPrefs();
+  }
+}): /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: settingRow
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: settingLabel
@@ -4580,7 +4623,8 @@ function App() {
       deptName
     });
   }, [settingsLoaded, showSettings, lightMode, textSize, deptName]);
-  const [teamList, setTeamList] = useState(sortONNs(normalizeTeam(ONNs)));
+	const [teamList, setTeamList] = useState(sortONNs(normalizeTeam(ONNs)));
+	const [teamNextId, setTeamNextId] = useState(0);
 
   const todayStr = new Date().toDateString();
   const T = lightMode ? {
@@ -4617,12 +4661,22 @@ function App() {
     scrollThumb: "#334155"
   };
 
-  useEffect(() => {
-    loadTeam().then(saved => {
-      if (saved && saved.length > 0) setTeamList(sortONNs(normalizeTeam(saved)));
-      setTeamLoaded(true);
-    });
-  }, []);
+	useEffect(() => {
+	  Promise.all([loadTeam(), loadNextId()]).then(([savedTeam, savedNextId]) => {
+		const team = savedTeam && savedTeam.length > 0
+		  ? sortONNs(normalizeTeam(savedTeam))
+		  : sortONNs(normalizeTeam(ONNs));
+		if (savedTeam && savedTeam.length > 0) setTeamList(team);
+		// High-water mark: never let a new ID equal any ID that has ever existed.
+		const maxFromTeam = team.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
+		const hwm = Math.max(
+		  typeof savedNextId === "number" && savedNextId > 0 ? savedNextId : 0,
+		  maxFromTeam + 1
+		);
+		setTeamNextId(hwm);
+		setTeamLoaded(true);
+	  });
+	}, []);
   useEffect(() => {
     if (!teamLoaded) return;
     let cancelled = false;
@@ -4762,23 +4816,24 @@ function App() {
           } else {
             const shouldClearOldAway = !!startDate && thisDate >= startDate && isAway(existingSlot.status) && (sameDay(existingSlot.returnDate, normalizedSlot.returnDate) || oldReturnDate && sameDay(existingSlot.returnDate, oldReturnDate));
             if (!shouldClearOldAway) return;
-            next[d] = {
-              ...dBase,
-              staff: {
-                ...(dBase.staff || {}),
-                [onnId]: {
-                  status: STATUS.CH,
-                  cov1: "",
-                  cov2: "",
-                  docCoverage: {},
-                  returnDate: "",
-                  note: existingSlot.note || ""
-                }
-              }
-            };
-          }
-        });
-      } else if (!isAway(slot.status)) {
+			const onn = teamList.find(o => String(o.id) === String(onnId));
+						next[d] = {
+						  ...dBase,
+						  staff: {
+							...(dBase.staff || {}),
+							[onnId]: {
+							  status: getDefaultStatusForDay(onn, d),
+							  cov1: "",
+							  cov2: "",
+							  docCoverage: {},
+							  returnDate: "",
+							  note: existingSlot.note || ""
+							}
+						  }
+						};
+					  }
+					});
+				  } else if (!isAway(slot.status)) {
         if (oldSlot.returnDate) {
           DAYS.forEach((d, i) => {
             if (d === day) return;
@@ -4788,22 +4843,23 @@ function App() {
               staff: {}
             };
             const ds = next[d]?.staff?.[onnId] || {};
-            if (ds.returnDate === oldSlot.returnDate && isAway(ds.status)) {
-              next[d] = {
-                ...dBase,
-                staff: {
-                  ...(dBase.staff || {}),
-                  [onnId]: {
-                    status: STATUS.CH,
-                    cov1: "",
-                    cov2: "",
-                    docCoverage: {},
-                    returnDate: "",
-                    note: ds.note || ""
-                  }
-                }
-              };
-            }
+			if (ds.returnDate === oldSlot.returnDate && isAway(ds.status)) {
+						  const onn = teamList.find(o => String(o.id) === String(onnId));
+						  next[d] = {
+							...dBase,
+							staff: {
+							  ...(dBase.staff || {}),
+							  [onnId]: {
+								status: getDefaultStatusForDay(onn, d),
+								cov1: "",
+								cov2: "",
+								docCoverage: {},
+								returnDate: "",
+								note: ds.note || ""
+							  }
+							}
+						  };
+						}
           });
         }
       }
@@ -4889,11 +4945,16 @@ function App() {
     remote: "WFH shifts"
   };
   const displayed = activeDay ? [activeDay] : DAYS;
-  const handleTeamSave = newList => {
-    const sorted = sortONNs(normalizeTeam(newList));
-    setTeamList(sorted);
-    saveTeam(sorted);
-    setWeekData(prev => {
+const handleTeamSave = (newList, newNextId) => {
+  const sorted = sortONNs(normalizeTeam(newList));
+  setTeamList(sorted);
+  saveTeam(sorted);
+  // Persist the high-water mark so it survives page reloads.
+  if (typeof newNextId === "number" && newNextId > teamNextId) {
+    setTeamNextId(newNextId);
+    saveNextId(newNextId);
+  }
+  setWeekData(prev => {
       const next = {};
       DAYS.forEach(day => {
         const staff = {};
@@ -4944,7 +5005,10 @@ function App() {
     weekData: weekData,
     weekStart: weekStart,
     deptName: deptName,
-    setDeptName: setDeptName
+    setDeptName: setDeptName,
+    deptName: deptName,
+	setDeptName: setDeptName,
+	nextId: teamNextId
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
