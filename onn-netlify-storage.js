@@ -1,5 +1,6 @@
 (function () {
   const LOCAL_NAMESPACE = "onn_scheduler:";
+  const AUTH_ENDPOINT = "/.netlify/functions/onn-auth";
   const STORAGE_ENDPOINT = "/.netlify/functions/onn-storage";
   const WEEK_KEY_RE = /^onn_week5_\d{4}-\d{2}-\d{2}$/;
 
@@ -38,8 +39,8 @@
     };
   }
 
-  function withQuery(params) {
-    const url = new URL(STORAGE_ENDPOINT, window.location.origin);
+  function withQuery(params, endpoint = STORAGE_ENDPOINT) {
+    const url = new URL(endpoint, window.location.origin);
 
     Object.entries(params).forEach(([key, value]) => {
       if (value == null) return;
@@ -55,6 +56,10 @@
     return error;
   }
 
+  function emitAuthState(detail) {
+    window.dispatchEvent(new CustomEvent("onn-auth-state", { detail }));
+  }
+
   async function readJson(response) {
     try {
       return await response.json();
@@ -66,7 +71,92 @@
   async function buildResponseError(response, fallbackMessage) {
     const payload = await readJson(response);
     const detail = typeof payload?.error === "string" ? payload.error : "";
+    if (response.status === 401) {
+      return makeError(detail || "Authentication required.", "auth");
+    }
     return makeError(detail ? `${fallbackMessage} ${detail}` : fallbackMessage, "storage");
+  }
+
+  function createAuthClient() {
+    async function request(action, init) {
+      if (window.location.protocol === "file:") {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({
+            "x-onn-auth": "1",
+            "x-onn-auth-enabled": "0",
+          }),
+          json: async () => ({
+            enabled: false,
+            authenticated: true,
+          }),
+        };
+      }
+
+      return fetch(withQuery({ action }, AUTH_ENDPOINT), {
+        ...init,
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          ...(init && init.headers ? init.headers : {}),
+        },
+      });
+    }
+
+    async function parseStatusResponse(response) {
+      const payload = await readJson(response);
+      const status = {
+        enabled: !!payload?.enabled,
+        authenticated: payload?.authenticated !== false,
+      };
+      emitAuthState(status);
+      return status;
+    }
+
+    return {
+      async status() {
+        const response = await request("status", { method: "GET", headers: {} });
+
+        if (response.headers.get("x-onn-auth") !== "1") {
+          const fallback = {
+            enabled: false,
+            authenticated: true,
+          };
+          emitAuthState(fallback);
+          return fallback;
+        }
+
+        return parseStatusResponse(response);
+      },
+
+      async login(password) {
+        const response = await request("login", {
+          method: "POST",
+          body: JSON.stringify({ password }),
+        });
+
+        if (!response.ok) {
+          throw await buildResponseError(response, "Login failed.");
+        }
+
+        return parseStatusResponse(response);
+      },
+
+      async logout() {
+        const response = await request("logout", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+
+        if (!response.ok) {
+          throw await buildResponseError(response, "Sign out failed.");
+        }
+
+        return parseStatusResponse(response);
+      },
+    };
   }
 
   function createAutoNetlifyBackend() {
@@ -99,6 +189,15 @@
         }
 
         setMode("remote");
+
+        if (response.status === 401) {
+          emitAuthState({
+            enabled: response.headers.get("x-onn-auth-enabled") === "1",
+            authenticated: false,
+          });
+          window.dispatchEvent(new CustomEvent("onn-auth-required"));
+        }
+
         return response;
       } catch (error) {
         if (mode === "unknown") {
@@ -251,6 +350,8 @@
       },
     };
   }
+
+  window.onnAuthClient = createAuthClient();
 
   if (!window.onnDefaultStorageBackend) {
     window.onnDefaultStorageBackend = createAutoNetlifyBackend();

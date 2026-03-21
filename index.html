@@ -201,6 +201,20 @@ function buildDefault(teamOnns = ONNs) {
   });
   return data;
 }
+function buildClearedWeek(teamOnns = ONNs) {
+  const data = {};
+  DAYS.forEach(day => {
+    data[day] = {
+      notes: "",
+      holiday: false,
+      staff: {}
+    };
+    teamOnns.forEach(o => {
+      data[day].staff[o.id] = buildInitialSlot(o);
+    });
+  });
+  return data;
+}
 function hydrateWeekData(data, teamOnns = ONNs) {
   const next = {};
   DAYS.forEach(day => {
@@ -840,6 +854,483 @@ if (!Array.isArray(teamList)) {
   return rows;
 }
 
+const OUTLOOK_STATUS_ALIASES = [{
+  exactPatterns: [/^CH$/i, /^CHESTNUT(?:\s+HILL)?$/i],
+  prefixPattern: /^(?:CH|CHESTNUT(?:\s+HILL)?)\b/i,
+  mentionPattern: /\b(?:CH|CHESTNUT(?:\s+HILL)?)\b/i,
+  status: STATUS.CH
+}, {
+  exactPatterns: [/^LW$/i, /^LONGWOOD$/i],
+  prefixPattern: /^(?:LW|LONGWOOD)\b/i,
+  mentionPattern: /\b(?:LW|LONGWOOD)\b/i,
+  status: STATUS.LW
+}, {
+  exactPatterns: [/^WFH$/i, /^REMOTE$/i, /^WORK\s+FROM\s+HOME$/i],
+  prefixPattern: /^(?:WFH|REMOTE|WORK\s+FROM\s+HOME)\b/i,
+  mentionPattern: /\b(?:WFH|REMOTE|WORK\s+FROM\s+HOME)\b/i,
+  status: STATUS.REMOTE
+}, {
+  exactPatterns: [/^DAY\s+OFF$/i, /^OFF$/i, /^OOO$/i, /^PTO$/i],
+  prefixPattern: /^(?:DAY\s+OFF|OFF|OOO|PTO)\b/i,
+  mentionPattern: /\b(?:DAY\s+OFF|OFF|OOO|PTO)\b/i,
+  status: STATUS.OFF
+}, {
+  exactPatterns: [/^VAC$/i, /^VACATION$/i],
+  prefixPattern: /^(?:VACATION|VAC)\b/i,
+  mentionPattern: /\b(?:VACATION|VAC)\b/i,
+  status: STATUS.VACATION
+}];
+const OUTLOOK_NAME_ALIASES = {
+  Ivonne: ["Ivone"]
+};
+
+function escapeRegExp(str) {
+  return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function decodeIcsTextValue(value) {
+  return String(value || "").replace(/\\n/gi, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
+}
+function unfoldIcsText(text) {
+  return String(text || "").replace(/\r?\n[ \t]/g, "");
+}
+function parseIcsDateValue(value) {
+  const raw = String(value || "").trim();
+  const m = raw.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?(Z)?$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  const hour = Number(m[4] || 0);
+  const minute = Number(m[5] || 0);
+  const second = Number(m[6] || 0);
+  const isUtc = m[7] === "Z";
+  const date = isUtc ? new Date(Date.UTC(y, month, day, hour, minute, second)) : new Date(y, month, day, hour, minute, second);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function parseIcsEvents(text) {
+  const lines = unfoldIcsText(text).split(/\r?\n/);
+  const events = [];
+  let current = null;
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line) continue;
+    if (line === "BEGIN:VEVENT") {
+      current = {};
+      continue;
+    }
+    if (line === "END:VEVENT") {
+      if (current) events.push(current);
+      current = null;
+      continue;
+    }
+    if (!current) continue;
+    const sep = line.indexOf(":");
+    if (sep === -1) continue;
+    const head = line.slice(0, sep);
+    const value = line.slice(sep + 1);
+    const parts = head.split(";");
+    const name = parts[0].toUpperCase();
+    const params = {};
+    parts.slice(1).forEach(part => {
+      const idx = part.indexOf("=");
+      if (idx === -1) {
+        params[part.toUpperCase()] = true;
+      } else {
+        params[part.slice(0, idx).toUpperCase()] = part.slice(idx + 1);
+      }
+    });
+    if (!current[name]) current[name] = [];
+    current[name].push({
+      value: decodeIcsTextValue(value),
+      params
+    });
+  }
+  return events;
+}
+function getIcsField(event, name) {
+  const list = event?.[name];
+  return Array.isArray(list) && list.length > 0 ? list[0] : null;
+}
+function getIcsEventDates(event) {
+  const startField = getIcsField(event, "DTSTART");
+  if (!startField) return [];
+  const endField = getIcsField(event, "DTEND");
+  const isDateOnly = startField.params?.VALUE === "DATE";
+  const start = parseIcsDateValue(startField.value);
+  const end = endField ? parseIcsDateValue(endField.value) : null;
+  if (!start) return [];
+  const dates = [];
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  let last = new Date(start);
+  last.setHours(0, 0, 0, 0);
+  if (end) {
+    last = new Date(end);
+    last.setHours(0, 0, 0, 0);
+    if (isDateOnly || end.getHours() === 0 && end.getMinutes() === 0 && end.getSeconds() === 0 && last.getTime() > cursor.getTime()) {
+      last.setDate(last.getDate() - 1);
+    }
+  }
+  if (last.getTime() < cursor.getTime()) {
+    return [cursor];
+  }
+  while (cursor.getTime() <= last.getTime()) {
+    dates.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+function getWeekStartForDate(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+function getDayNameForDate(date) {
+  const day = date.getDay();
+  return day >= 1 && day <= 5 ? DAYS[day - 1] : null;
+}
+function getOutlookNameVariants(onn) {
+  const builtInAliases = OUTLOOK_NAME_ALIASES[String(onn?.name || "").trim()] || [];
+  const configuredAliases = Array.isArray(onn?.aliases) ? onn.aliases : [];
+  return Array.from(new Set([onn?.name, ...builtInAliases, ...configuredAliases].map(value => String(value || "").trim()).filter(Boolean)));
+}
+function parseOutlookStatusToken(rawStatus) {
+  const cleaned = String(rawStatus || "").replace(/^[\s\-:/|]+/, "").replace(/[_/|-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+  const statusesMentioned = OUTLOOK_STATUS_ALIASES.filter(option => option.mentionPattern.test(cleaned)).map(option => option.status);
+  if (new Set(statusesMentioned).size > 1) {
+    return null;
+  }
+  for (const option of OUTLOOK_STATUS_ALIASES) {
+    if (option.exactPatterns.some(pattern => pattern.test(cleaned)) || option.prefixPattern.test(cleaned)) {
+      return option.status;
+    }
+  }
+  return null;
+}
+function parseOutlookCalendarSummary(summary, teamList) {
+  const cleaned = String(summary || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+  const candidates = [];
+  for (const onn of teamList || []) {
+    for (const nameVariant of getOutlookNameVariants(onn)) {
+      candidates.push({
+        onn,
+        nameVariant
+      });
+    }
+  }
+  candidates.sort((a, b) => b.nameVariant.length - a.nameVariant.length);
+  for (const candidate of candidates) {
+    if (!candidate.nameVariant) continue;
+    if (cleaned.length <= candidate.nameVariant.length) continue;
+    if (cleaned.slice(0, candidate.nameVariant.length).toLowerCase() !== candidate.nameVariant.toLowerCase()) continue;
+    const rawStatus = cleaned.slice(candidate.nameVariant.length).replace(/^[\s\-:/|]+/, "");
+    const status = parseOutlookStatusToken(rawStatus);
+    if (!status) continue;
+    return {
+      onn: candidate.onn,
+      status,
+      rawStatus: rawStatus.trim()
+    };
+  }
+  return null;
+}
+function parseCsvRecords(text) {
+  const input = String(text || "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let current = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (inQuotes) {
+      if (ch === "\"") {
+        if (input[i + 1] === "\"") {
+          field += "\"";
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ",") {
+      current.push(field);
+      field = "";
+      continue;
+    }
+    if (ch === "\r") {
+      continue;
+    }
+    if (ch === "\n") {
+      current.push(field);
+      rows.push(current);
+      current = [];
+      field = "";
+      continue;
+    }
+    field += ch;
+  }
+  current.push(field);
+  rows.push(current);
+  const headers = rows.shift() || [];
+  return rows.filter(row => row.some(cell => String(cell || "").trim() !== "")).map(row => {
+    const record = {};
+    headers.forEach((header, idx) => {
+      record[String(header || "").trim()] = row[idx] != null ? String(row[idx]) : "";
+    });
+    return record;
+  });
+}
+function normalizeOutlookCsvColumnName(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function getOutlookCsvValue(record, candidateNames) {
+  if (!record || typeof record !== "object") return "";
+  const entries = Object.entries(record);
+  for (const candidate of candidateNames) {
+    const wanted = normalizeOutlookCsvColumnName(candidate);
+    const match = entries.find(([key]) => normalizeOutlookCsvColumnName(key) === wanted);
+    if (match && String(match[1] || "").trim() !== "") {
+      return String(match[1] || "").trim();
+    }
+  }
+  return "";
+}
+function parseOutlookCsvBoolean(value) {
+  const cleaned = String(value || "").trim().toLowerCase();
+  return cleaned === "true" || cleaned === "yes" || cleaned === "y" || cleaned === "1";
+}
+function parseOutlookCsvTimeParts(value) {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return null;
+  const m = cleaned.match(/^(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!m) return null;
+  let hour = Number(m[1] || 0);
+  const minute = Number(m[2] || 0);
+  const second = Number(m[3] || 0);
+  const meridiem = String(m[4] || "").toUpperCase();
+  if (meridiem === "PM" && hour < 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return {
+    hour,
+    minute,
+    second
+  };
+}
+function combineOutlookCsvDateAndTime(dateValue, timeValue) {
+  const date = parseDateAtStartOfDay(dateValue);
+  if (!date) return null;
+  const time = parseOutlookCsvTimeParts(timeValue);
+  if (!time) return date;
+  date.setHours(time.hour, time.minute, time.second, 0);
+  return date;
+}
+function isOutlookCsvMidnightTime(timeValue) {
+  const time = parseOutlookCsvTimeParts(timeValue);
+  return !!time && time.hour === 0 && time.minute === 0 && time.second === 0;
+}
+function getOutlookCsvEventDates(record) {
+  const startDateValue = getOutlookCsvValue(record, ["Start Date", "StartDate"]);
+  const endDateValue = getOutlookCsvValue(record, ["End Date", "EndDate"]);
+  const startTimeValue = getOutlookCsvValue(record, ["Start Time", "StartTime"]);
+  const endTimeValue = getOutlookCsvValue(record, ["End Time", "EndTime"]);
+  const allDay = parseOutlookCsvBoolean(getOutlookCsvValue(record, ["All day event", "AllDayEvent"]));
+  const startDate = combineOutlookCsvDateAndTime(startDateValue, startTimeValue);
+  if (!startDate) return [];
+  const endDate = combineOutlookCsvDateAndTime(endDateValue || startDateValue, endTimeValue);
+  const dates = [];
+  const cursor = new Date(startDate);
+  cursor.setHours(0, 0, 0, 0);
+  let last = endDate ? new Date(endDate) : new Date(startDate);
+  last.setHours(0, 0, 0, 0);
+  if (last.getTime() > cursor.getTime() && ((allDay || isOutlookCsvMidnightTime(endTimeValue)) && (!endTimeValue || isOutlookCsvMidnightTime(endTimeValue)))) {
+    last.setDate(last.getDate() - 1);
+  }
+  if (last.getTime() < cursor.getTime()) {
+    return [cursor];
+  }
+  while (cursor.getTime() <= last.getTime()) {
+    dates.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+async function importOutlookCalendarCsvText(text, teamList) {
+  if (!Array.isArray(teamList) || teamList.length === 0) {
+    throw new Error("Team list is not available for calendar import.");
+  }
+  const records = parseCsvRecords(text);
+  const weeksToSave = new Map();
+  const skippedEvents = [];
+  let importedEvents = 0;
+  let importedDays = 0;
+  let weekendDaysSkipped = 0;
+  for (const record of records) {
+    const summary = getOutlookCsvValue(record, ["Subject"]);
+    const parsed = parseOutlookCalendarSummary(summary, teamList);
+    const dates = getOutlookCsvEventDates(record);
+    if (!parsed || dates.length === 0) {
+      if (summary) skippedEvents.push(summary);
+      continue;
+    }
+    let appliedThisEvent = false;
+    const lastDate = dates[dates.length - 1];
+    const returnDate = parsed.status === STATUS.VACATION ? toISODateString(new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate() + 1)) : "";
+    for (const date of dates) {
+      const dayName = getDayNameForDate(date);
+      if (!dayName) {
+        weekendDaysSkipped += 1;
+        continue;
+      }
+      const weekStart = getWeekStartForDate(date);
+      const weekKey = skey(weekStart);
+      let weekData = weeksToSave.get(weekKey);
+      if (!weekData) {
+        const loaded = await loadWeekWithCarryover(weekStart, teamList);
+        weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : hydrateWeekData(buildDefault(teamList), teamList);
+        weeksToSave.set(weekKey, weekData);
+      }
+      const dayData = weekData[dayName] || {
+        notes: "",
+        holiday: false,
+        staff: {}
+      };
+      const slot = getSlot(dayData, parsed.onn.id);
+      weekData[dayName] = {
+        ...dayData,
+        staff: {
+          ...(dayData.staff || {}),
+          [parsed.onn.id]: {
+            ...slot,
+            status: parsed.status,
+            cov1: "",
+            cov2: "",
+            docCoverage: isAway(parsed.status) ? slot.docCoverage || {} : {},
+            returnDate: parsed.status === STATUS.VACATION ? returnDate : ""
+          }
+        }
+      };
+      importedDays += 1;
+      appliedThisEvent = true;
+    }
+    if (appliedThisEvent) importedEvents += 1;
+  }
+  for (const [weekKey, weekData] of weeksToSave.entries()) {
+    const weekStart = parseDateAtStartOfDay(weekKey.slice("onn_week5_".length));
+    if (!weekStart) continue;
+    await saveWeek(weekStart, weekData);
+  }
+  return {
+    totalEvents: records.length,
+    importedEvents,
+    importedDays,
+    weekendDaysSkipped,
+    skippedEvents,
+    updatedWeeks: Array.from(weeksToSave.keys()).sort()
+  };
+}
+async function importOutlookCalendarIcsText(text, teamList) {
+  if (!Array.isArray(teamList) || teamList.length === 0) {
+    throw new Error("Team list is not available for calendar import.");
+  }
+  const events = parseIcsEvents(text);
+  const weeksToSave = new Map();
+  const skippedEvents = [];
+  let importedEvents = 0;
+  let importedDays = 0;
+  let weekendDaysSkipped = 0;
+  for (const event of events) {
+    const summary = getIcsField(event, "SUMMARY")?.value || "";
+    const parsed = parseOutlookCalendarSummary(summary, teamList);
+    const dates = getIcsEventDates(event);
+    if (!parsed || dates.length === 0) {
+      if (summary) skippedEvents.push(summary);
+      continue;
+    }
+    let appliedThisEvent = false;
+    const lastDate = dates[dates.length - 1];
+    const returnDate = parsed.status === STATUS.VACATION ? toISODateString(new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate() + 1)) : "";
+    for (const date of dates) {
+      const dayName = getDayNameForDate(date);
+      if (!dayName) {
+        weekendDaysSkipped += 1;
+        continue;
+      }
+      const weekStart = getWeekStartForDate(date);
+      const weekKey = skey(weekStart);
+      let weekData = weeksToSave.get(weekKey);
+      if (!weekData) {
+        const loaded = await loadWeekWithCarryover(weekStart, teamList);
+        weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : hydrateWeekData(buildDefault(teamList), teamList);
+        weeksToSave.set(weekKey, weekData);
+      }
+      const dayData = weekData[dayName] || {
+        notes: "",
+        holiday: false,
+        staff: {}
+      };
+      const slot = getSlot(dayData, parsed.onn.id);
+      weekData[dayName] = {
+        ...dayData,
+        staff: {
+          ...(dayData.staff || {}),
+          [parsed.onn.id]: {
+            ...slot,
+            status: parsed.status,
+            cov1: "",
+            cov2: "",
+            docCoverage: isAway(parsed.status) ? slot.docCoverage || {} : {},
+            returnDate: parsed.status === STATUS.VACATION ? returnDate : ""
+          }
+        }
+      };
+      importedDays += 1;
+      appliedThisEvent = true;
+    }
+    if (appliedThisEvent) importedEvents += 1;
+  }
+  for (const [weekKey, weekData] of weeksToSave.entries()) {
+    const weekStart = parseDateAtStartOfDay(weekKey.slice("onn_week5_".length));
+    if (!weekStart) continue;
+    await saveWeek(weekStart, weekData);
+  }
+  return {
+    totalEvents: events.length,
+    importedEvents,
+    importedDays,
+    weekendDaysSkipped,
+    skippedEvents,
+    updatedWeeks: Array.from(weeksToSave.keys()).sort()
+  };
+}
+async function importOutlookCalendarFileText(file, text, teamList) {
+  const fileName = String(file?.name || "").toLowerCase();
+  const trimmedText = String(text || "").trim();
+  if (fileName.endsWith(".csv")) {
+    return await importOutlookCalendarCsvText(trimmedText, teamList);
+  }
+  if (fileName.endsWith(".ics") || /^BEGIN:VCALENDAR/i.test(trimmedText)) {
+    return await importOutlookCalendarIcsText(trimmedText, teamList);
+  }
+  const records = parseCsvRecords(trimmedText);
+  if (records.length > 0 && Object.keys(records[0] || {}).some(key => normalizeOutlookCsvColumnName(key) === "subject")) {
+    return await importOutlookCalendarCsvText(trimmedText, teamList);
+  }
+  return await importOutlookCalendarIcsText(trimmedText, teamList);
+}
+
 function buildInitialSlot(onn) {
   return {
     status: onn.floater ? STATUS.OFF : STATUS.CH,
@@ -880,6 +1371,16 @@ const TeamCtx = createContext(ONNs);
 const ThemeCtx = createContext(false);
 const useTheme = () => useContext(ThemeCtx);
 const useTeam = () => useContext(TeamCtx);
+function useViewportWidth() {
+  const [viewportWidth, setViewportWidth] = React.useState(() => typeof window === "undefined" ? 1280 : window.innerWidth);
+  React.useEffect(() => {
+    const update = () => setViewportWidth(window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return viewportWidth;
+}
 
 // ─── STYLE CONSTANTS ─────────────────────────────────────────────────────────
 
@@ -2331,8 +2832,8 @@ function FloaterPicker({
       display: "flex",
       gap: compact ? "4px" : "6px",
       alignItems: "center",
-      flexWrap: compact ? "nowrap" : "wrap",
-      justifyContent: compact ? "center" : "flex-start"
+      flexWrap: "wrap",
+      justifyContent: "flex-start"
     }
   }, /*#__PURE__*/React.createElement("select", {
     value: selectedId,
@@ -2345,9 +2846,10 @@ function FloaterPicker({
       fontSize: "11px",
       fontFamily: "inherit",
       outline: "none",
-      flex: compact ? "0 0 320px" : 1,
-      width: compact ? "320px" : undefined,
-      minWidth: compact ? "140px" : "80px"
+      flex: compact ? "1 1 220px" : 1,
+      width: compact ? "100%" : undefined,
+      minWidth: compact ? "180px" : "80px",
+      maxWidth: "100%"
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
@@ -2496,6 +2998,7 @@ function DayCard({
   }, []);
   // Density levels: 0=minimal(name+dot), 1=name+badge, 2=+doctors, 3=full
   const density = isSingle ? 3 : cardW >= 300 ? 3 : cardW >= 230 ? 2 : cardW >= 170 ? 1 : 0;
+  const singleDaySingleColumn = isSingle && cardW < 720;
   const regulars = ONNs.filter(o => !o.floater);
   const floaters = ONNs.filter(o => o.floater);
   const regularsForStats = regulars.filter(o => !o.orienting);
@@ -2742,7 +3245,7 @@ function DayCard({
       overflowY: isSingle ? "visible" : editable || density <= 1 ? "visible" : "auto",
       display: isSingle ? "grid" : density <= 1 ? "flex" : "block",
       flexDirection: density <= 1 ? "column" : undefined,
-      gridTemplateColumns: isSingle ? "1fr 1fr" : undefined,
+      gridTemplateColumns: isSingle ? singleDaySingleColumn ? "1fr" : "1fr 1fr" : undefined,
       alignContent: "start"
     }
 }, (() => {
@@ -2752,7 +3255,7 @@ function DayCard({
       onn: onn,
       slot: getSlot(dayData, onn.id),
       editable: editable,
-      zebra: isSingle ? Math.floor(i / 2) % 2 !== 0 : i % 2 !== 0,
+      zebra: isSingle ? singleDaySingleColumn ? i % 2 !== 0 : Math.floor(i / 2) % 2 !== 0 : i % 2 !== 0,
     isSingle: isSingle,
     density: isSingle && onn.floater ? 3 : density,
     incomingCoverage: incomingMap[onn.id] || [],
@@ -2781,7 +3284,7 @@ function DayCard({
 		onRemoveFloater: removeFloaterFromDay,
 		awayIds: awayIds
 	  }));
-	  })(), isSingle && (() => {
+	  })(), isSingle && !singleDaySingleColumn && (() => {
     const totalRows = combinedVisibleRows.length;
     if (totalRows % 2 === 0) return null;
     const zebra = Math.floor(totalRows / 2) % 2 !== 0;
@@ -4154,6 +4657,10 @@ function SettingsModal({
   onns,
   onSave,
   onPreferencesSave,
+  onIcsImport,
+  authEnabled,
+  onLogout,
+  hasUnsavedChanges,
   onClose,
   lightMode,
   setLightMode,
@@ -4167,13 +4674,20 @@ function SettingsModal({
   nextId
 }) {
   const lm = lightMode;
+  const viewportWidth = useViewportWidth();
+  const isPhone = viewportWidth <= 640;
   const [tab, setTab] = React.useState("team");
   const [exporting, setExporting] = React.useState(false);
   const [exportingCsv, setExportingCsv] = React.useState(false);
+  const [importingIcs, setImportingIcs] = React.useState(false);
+  const [signingOut, setSigningOut] = React.useState(false);
+  const [icsFeedback, setIcsFeedback] = React.useState("");
+  const [icsFeedbackTone, setIcsFeedbackTone] = React.useState("neutral");
   const [resetConfirm, setResetConfirm] = React.useState(false);
   const [prefLightMode, setPrefLightMode] = React.useState(lightMode);
   const [prefTextSize, setPrefTextSize] = React.useState(textSize);
   const [prefDeptName, setPrefDeptName] = React.useState(deptName);
+  const icsFileRef = React.useRef(null);
   const initialPrefsRef = React.useRef({
     lightMode,
     textSize,
@@ -4214,9 +4728,70 @@ function SettingsModal({
     URL.revokeObjectURL(url);
     setExportingCsv(false);
   };
+  const handleImportIcsClick = () => {
+    if (hasUnsavedChanges) {
+      setIcsFeedback("Save or discard this week's edits before importing an Outlook calendar file.");
+      setIcsFeedbackTone("error");
+      return;
+    }
+    setIcsFeedback("");
+    setIcsFeedbackTone("neutral");
+    if (icsFileRef.current) {
+      icsFileRef.current.value = "";
+      icsFileRef.current.click();
+    }
+  };
+  const handleImportIcsFile = async e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const confirmed = window.confirm("Importing this Outlook calendar export will update matching ONN weekday statuses in saved schedules. Continue?");
+    if (!confirmed) {
+      e.target.value = "";
+      return;
+    }
+    setImportingIcs(true);
+    setIcsFeedback("");
+    setIcsFeedbackTone("neutral");
+    try {
+      const text = await file.text();
+      const result = await importOutlookCalendarFileText(file, text, teamList);
+      if (typeof onIcsImport === "function") {
+        await onIcsImport(result);
+      }
+      if (result.importedEvents === 0) {
+        setIcsFeedback("No matching ONN events were imported. Check that event titles use the current ONN names plus CH, LW, WFH, Off, or Vacation.");
+        setIcsFeedbackTone("error");
+      } else {
+        const skippedLabel = result.skippedEvents.length > 0 ? ` Skipped ${result.skippedEvents.length} event${result.skippedEvents.length === 1 ? "" : "s"} that did not match the ONN naming format.` : "";
+        const weekendLabel = result.weekendDaysSkipped > 0 ? ` Ignored ${result.weekendDaysSkipped} weekend day${result.weekendDaysSkipped === 1 ? "" : "s"}.` : "";
+        setIcsFeedback(`Imported ${result.importedEvents} event${result.importedEvents === 1 ? "" : "s"} into ${result.updatedWeeks.length} week${result.updatedWeeks.length === 1 ? "" : "s"} and updated ${result.importedDays} weekday slot${result.importedDays === 1 ? "" : "s"}.${skippedLabel}${weekendLabel}`);
+        setIcsFeedbackTone(result.skippedEvents.length > 0 ? "warn" : "success");
+      }
+    } catch (err) {
+      setIcsFeedback("Calendar import failed. Make sure the file is a valid Outlook .csv or .ics export.");
+      setIcsFeedbackTone("error");
+      console.error("ONN Scheduler ICS import error:", err);
+    } finally {
+      setImportingIcs(false);
+      e.target.value = "";
+    }
+  };
   const handleReset = async () => {
     await factoryReset();
     window.location.reload();
+  };
+  const handleLogoutClick = async () => {
+    if (typeof onLogout !== "function") return;
+    if (hasUnsavedChanges) {
+      const confirmed = window.confirm("You have unsaved schedule edits. Sign out anyway?");
+      if (!confirmed) return;
+    }
+    setSigningOut(true);
+    try {
+      await onLogout();
+    } finally {
+      setSigningOut(false);
+    }
   };
   const overlayStyle = {
     position: "fixed",
@@ -4226,34 +4801,37 @@ function SettingsModal({
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: "24px"
+    padding: isPhone ? "12px" : "24px"
   };
   const boxStyle = {
     background: lm ? "#ffffff" : "#0f172a",
     border: lm ? "1px solid rgba(0,0,0,0.1)" : "1px solid rgba(255,255,255,0.1)",
-    borderRadius: "18px",
+    borderRadius: isPhone ? "16px" : "18px",
     width: "100%",
     maxWidth: "720px",
-    height: "82vh",
+    height: isPhone ? "92vh" : "82vh",
     display: "flex",
     flexDirection: "column",
     boxShadow: "0 24px 60px rgba(0,0,0,0.25)"
   };
   const tabBtn = t => ({
-    padding: "8px 20px",
+    padding: isPhone ? "8px 14px" : "8px 20px",
     borderRadius: "8px",
     border: "none",
     fontFamily: "inherit",
     fontWeight: 600,
     fontSize: "12px",
+    flex: isPhone ? 1 : undefined,
     cursor: "pointer",
     background: tab === t ? lm ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
     color: tab === t ? lm ? "#4338ca" : "#a5b4fc" : lm ? "#64748b" : "#94a3b8"
   });
   const settingRow = {
     display: "flex",
-    alignItems: "center",
+    flexDirection: isPhone ? "column" : "row",
+    alignItems: isPhone ? "stretch" : "center",
     justifyContent: "space-between",
+    gap: isPhone ? "10px" : 0,
     padding: "14px 0",
     borderBottom: `1px solid ${lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)"}`
   };
@@ -4273,7 +4851,7 @@ function SettingsModal({
     style: boxStyle
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "20px 24px 0",
+      padding: isPhone ? "16px 16px 0" : "20px 24px 0",
       flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -4306,7 +4884,7 @@ function SettingsModal({
       background: lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
       borderRadius: "10px",
       padding: "3px",
-      width: "fit-content"
+      width: isPhone ? "100%" : "fit-content"
     }
   }, /*#__PURE__*/React.createElement("button", {
     style: tabBtn("team"),
@@ -4318,7 +4896,7 @@ function SettingsModal({
     style: {
       overflowY: "auto",
       flex: 1,
-      padding: "16px 24px 24px"
+      padding: isPhone ? "14px 16px 18px" : "16px 24px 24px"
     }
   }, tab === "team" ? /*#__PURE__*/React.createElement(EmbeddedTeamManager, {
   onns: onns,
@@ -4416,10 +4994,62 @@ function SettingsModal({
       fontSize: "13px",
       fontFamily: "inherit",
       outline: "none",
-      width: "240px",
-      marginLeft: "16px"
+      width: isPhone ? "100%" : "240px",
+      marginLeft: isPhone ? 0 : "16px",
+      marginTop: isPhone ? "10px" : 0
     }
   })), /*#__PURE__*/React.createElement("div", {
+    style: settingRow
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: settingLabel
+  }, "Outlook calendar import"), /*#__PURE__*/React.createElement("div", {
+    style: settingDesc
+  }, "Upload an Outlook .csv or .ics export with event titles like \"Alex LW\", \"Ann WFH\", or \"Nooni Vacation\"."), icsFeedback && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: "10px",
+      fontSize: "11px",
+      lineHeight: 1.45,
+      color: icsFeedbackTone === "error" ? "#b91c1c" : icsFeedbackTone === "warn" ? "#92400e" : "#065f46",
+      background: icsFeedbackTone === "error" ? "#fee2e2" : icsFeedbackTone === "warn" ? "#fef3c7" : "#d1fae5",
+      border: `1px solid ${icsFeedbackTone === "error" ? "#fecaca" : icsFeedbackTone === "warn" ? "#fcd34d" : "#6ee7b7"}`,
+      borderRadius: "8px",
+      padding: "8px 10px"
+    }
+  }, icsFeedback)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: "8px",
+      alignItems: "center",
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    ref: icsFileRef,
+    type: "file",
+    accept: ".csv,.ics,text/calendar,text/csv",
+    onChange: handleImportIcsFile,
+    style: {
+      display: "none"
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: handleImportIcsClick,
+    disabled: importingIcs,
+    style: {
+      padding: "7px 16px",
+      borderRadius: "8px",
+      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
+      background: lm ? "#f8fafc" : "rgba(255,255,255,0.07)",
+      color: lm ? "#374151" : "#e2e8f0",
+      fontFamily: "inherit",
+      fontSize: "12px",
+      fontWeight: 600,
+      cursor: importingIcs ? "default" : "pointer"
+    }
+  }, importingIcs ? "Importing…" : "Import Outlook file"))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: settingLabel
@@ -4460,6 +5090,31 @@ function SettingsModal({
       cursor: "pointer"
     }
   }, exportingCsv ? "Exporting…" : "⬇ Export CSV")), /*#__PURE__*/React.createElement("div", {
+    style: settingRow
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: settingLabel
+  }, "Site access"), /*#__PURE__*/React.createElement("div", {
+    style: settingDesc
+  }, authEnabled ? "This browser is currently signed in with the shared site password." : "Shared password protection is not enabled for this site.")), authEnabled && typeof onLogout === "function" ? /*#__PURE__*/React.createElement("button", {
+    onClick: handleLogoutClick,
+    disabled: signingOut,
+    style: {
+      padding: "7px 16px",
+      borderRadius: "8px",
+      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
+      background: "transparent",
+      color: lm ? "#374151" : "#e2e8f0",
+      fontFamily: "inherit",
+      fontSize: "12px",
+      fontWeight: 600,
+      cursor: signingOut ? "default" : "pointer"
+    }
+  }, signingOut ? "Signing out…" : "Sign out") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: "11px",
+      color: lm ? "#94a3b8" : "#64748b"
+    }
+  }, authEnabled ? "Shared password active" : "Open access")), /*#__PURE__*/React.createElement("div", {
     style: {
       ...settingRow,
       borderBottom: "none",
@@ -4560,7 +5215,266 @@ function SettingsModal({
     }
   }, tab === "settings" ? "Save" : "Close"))))));
 }
-function App() {
+function AuthShell({
+  children
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      minHeight: "100vh",
+      padding: "24px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "linear-gradient(160deg,#f0f4ff 0%,#faf5ff 55%,#f0fdf4 100%)",
+      fontFamily: "'DM Sans','Segoe UI',sans-serif"
+    }
+  }, children);
+}
+function AuthLoadingScreen() {
+  return /*#__PURE__*/React.createElement(AuthShell, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      maxWidth: "420px",
+      borderRadius: "22px",
+      padding: "28px 24px",
+      background: "rgba(255,255,255,0.92)",
+      border: "1px solid rgba(148,163,184,0.25)",
+      boxShadow: "0 24px 60px rgba(15,23,42,0.12)",
+      textAlign: "center",
+      color: "#0f172a"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "14px",
+      letterSpacing: "0.12em",
+      textTransform: "uppercase",
+      color: "#6366f1",
+      fontWeight: 700,
+      marginBottom: "10px"
+    }
+  }, "ONN Scheduler"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "24px",
+      fontWeight: 800,
+      marginBottom: "8px"
+    }
+  }, "Checking access"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "14px",
+      color: "#64748b"
+    }
+  }, "Verifying whether this browser is already signed in.")));
+}
+function SharedPasswordGate({
+  busy,
+  error,
+  onSubmit
+}) {
+  const viewportWidth = useViewportWidth();
+  const isPhone = viewportWidth <= 640;
+  const [password, setPassword] = React.useState("");
+  return /*#__PURE__*/React.createElement(AuthShell, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      maxWidth: "460px",
+      borderRadius: isPhone ? "22px" : "26px",
+      padding: isPhone ? "24px 18px" : "30px 30px",
+      background: "rgba(255,255,255,0.94)",
+      border: "1px solid rgba(148,163,184,0.25)",
+      boxShadow: "0 24px 60px rgba(15,23,42,0.14)",
+      color: "#0f172a"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "14px",
+      letterSpacing: "0.12em",
+      textTransform: "uppercase",
+      color: "#6366f1",
+      fontWeight: 700,
+      marginBottom: "10px"
+    }
+  }, "Protected Site"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: isPhone ? "28px" : "32px",
+      lineHeight: 1.05,
+      fontWeight: 800,
+      marginBottom: "10px"
+    }
+  }, "Enter the shared ONN password"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "14px",
+      lineHeight: 1.6,
+      color: "#64748b",
+      marginBottom: "18px"
+    }
+  }, "This scheduler is limited to staff with the team password. Once you sign in, this browser will stay signed in until you sign out or the session expires."), /*#__PURE__*/React.createElement("form", {
+    onSubmit: async e => {
+      e.preventDefault();
+      if (!password.trim() || busy) return;
+      await onSubmit(password);
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "password",
+    value: password,
+    onChange: e => setPassword(e.target.value),
+    placeholder: "Shared password",
+    autoComplete: "current-password",
+    style: {
+      width: "100%",
+      padding: "13px 15px",
+      borderRadius: "14px",
+      border: "1px solid #cbd5e1",
+      background: "#fff",
+      color: "#0f172a",
+      fontFamily: "inherit",
+      fontSize: "15px",
+      outline: "none"
+    }
+  }), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: "12px",
+      padding: "10px 12px",
+      borderRadius: "12px",
+      background: "#fee2e2",
+      border: "1px solid #fecaca",
+      color: "#b91c1c",
+      fontSize: "13px",
+      lineHeight: 1.5
+    }
+  }, error), /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    disabled: busy || !password.trim(),
+    style: {
+      width: "100%",
+      marginTop: "14px",
+      padding: "13px 18px",
+      borderRadius: "14px",
+      border: "none",
+      background: "linear-gradient(135deg,#4f46e5,#0f766e)",
+      color: "#fff",
+      fontFamily: "inherit",
+      fontSize: "14px",
+      fontWeight: 700,
+      cursor: busy || !password.trim() ? "default" : "pointer",
+      opacity: busy || !password.trim() ? 0.6 : 1
+    }
+  }, busy ? "Signing in…" : "Sign in")));
+}
+function Root() {
+  const [authState, setAuthState] = React.useState({
+    checking: true,
+    enabled: false,
+    authenticated: true,
+    busy: false,
+    error: ""
+  });
+  React.useEffect(() => {
+    let cancelled = false;
+    const authClient = window.onnAuthClient;
+    const applyState = detail => {
+      if (cancelled || !detail) return;
+      setAuthState(prev => ({
+        ...prev,
+        checking: false,
+        enabled: !!detail.enabled,
+        authenticated: detail.authenticated !== false,
+        busy: false,
+        error: ""
+      }));
+    };
+    const handleAuthState = event => applyState(event.detail);
+    const handleAuthRequired = () => {
+      if (cancelled) return;
+      setAuthState(prev => ({
+        ...prev,
+        checking: false,
+        enabled: true,
+        authenticated: false,
+        busy: false,
+        error: "Your session expired. Enter the shared password again."
+      }));
+    };
+    window.addEventListener("onn-auth-state", handleAuthState);
+    window.addEventListener("onn-auth-required", handleAuthRequired);
+    if (!authClient || typeof authClient.status !== "function") {
+      applyState({
+        enabled: false,
+        authenticated: true
+      });
+      return () => {
+        cancelled = true;
+        window.removeEventListener("onn-auth-state", handleAuthState);
+        window.removeEventListener("onn-auth-required", handleAuthRequired);
+      };
+    }
+    authClient.status().catch(() => {
+      if (cancelled) return;
+      setAuthState(prev => ({
+        ...prev,
+        checking: false,
+        enabled: true,
+        authenticated: false,
+        busy: false,
+        error: "Could not verify access right now. Try signing in again."
+      }));
+    });
+    return () => {
+      cancelled = true;
+      window.removeEventListener("onn-auth-state", handleAuthState);
+      window.removeEventListener("onn-auth-required", handleAuthRequired);
+    };
+  }, []);
+  const handleLogin = async password => {
+    const authClient = window.onnAuthClient;
+    if (!authClient || typeof authClient.login !== "function") return;
+    setAuthState(prev => ({
+      ...prev,
+      busy: true,
+      error: ""
+    }));
+    try {
+      await authClient.login(password);
+    } catch (err) {
+      setAuthState(prev => ({
+        ...prev,
+        busy: false,
+        error: err?.code === "auth" ? "That password did not work." : "Sign-in failed. Please try again."
+      }));
+    }
+  };
+  const handleLogout = async () => {
+    const authClient = window.onnAuthClient;
+    if (!authClient || typeof authClient.logout !== "function") {
+      setAuthState(prev => ({
+        ...prev,
+        enabled: false,
+        authenticated: false,
+        busy: false,
+        error: ""
+      }));
+      return;
+    }
+    await authClient.logout();
+  };
+  if (authState.checking) {
+    return /*#__PURE__*/React.createElement(AuthLoadingScreen, null);
+  }
+  if (authState.enabled && !authState.authenticated) {
+    return /*#__PURE__*/React.createElement(SharedPasswordGate, {
+      busy: authState.busy,
+      error: authState.error,
+      onSubmit: handleLogin
+    });
+  }
+  return /*#__PURE__*/React.createElement(App, {
+    authEnabled: authState.enabled,
+    onLogout: authState.enabled ? handleLogout : null
+  });
+}
+function App({
+  authEnabled = false,
+  onLogout = null
+}) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [weekData, setWeekData] = useState(buildDefault());
   const isDirty = React.useRef(false);
@@ -4588,6 +5502,10 @@ function App() {
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const FS = textSize === 2 ? 1.4 : textSize === 1 ? 1.2 : 1;
+  const viewportWidth = useViewportWidth();
+  const isPhone = viewportWidth <= 640;
+  const isNarrowLayout = viewportWidth <= 900;
+  const pagePad = isPhone ? "14px" : isNarrowLayout ? "18px" : "28px";
   const weekStart = getWeekStart(weekOffset);
   const weekDates = getWeekDates(weekStart);
   const confirmDiscardUnsaved = () => window.confirm("You have unsaved schedule edits for this week. Discard them and continue?");
@@ -4612,6 +5530,9 @@ function App() {
       const savedTextSize = Number(saved.textSize);
       if ([0, 1, 2].includes(savedTextSize)) setTextSize(savedTextSize);
       if (typeof saved.deptName === "string" && saved.deptName.trim()) setDeptName(saved.deptName.trim());
+    }).catch(err => {
+      if (cancelled || err?.code === "auth") return;
+      console.error("ONN Scheduler settings load error:", err);
     }).finally(() => {
       if (!cancelled) setSettingsLoaded(true);
     });
@@ -4626,6 +5547,7 @@ function App() {
       textSize,
       deptName
     }).catch(err => {
+      if (err?.code === "auth") return;
       console.error("ONN Scheduler settings save error:", err);
     });
   }, [settingsLoaded, showSettings, lightMode, textSize, deptName]);
@@ -4681,6 +5603,11 @@ function App() {
 		);
 		setTeamNextId(hwm);
 		setTeamLoaded(true);
+	  }).catch(err => {
+		if (err?.code !== "auth") {
+		  console.error("ONN Scheduler team load error:", err);
+		}
+		setTeamLoaded(true);
 	  });
 	}, []);
   useEffect(() => {
@@ -4705,6 +5632,12 @@ function App() {
         setHasUnsaved(false);
       }
       if (!cancelled) setLoading(false);
+    }).catch(err => {
+      if (cancelled) return;
+      if (err?.code !== "auth") {
+        console.error("ONN Scheduler week load error:", err);
+      }
+      setLoading(false);
     });
     return () => {
       cancelled = true;
@@ -4721,8 +5654,9 @@ function App() {
   }, [editMode, hasUnsaved]);
   const [showClearConfirm, setShowClearConfirm] = React.useState(false);
   const handleClearScope = async () => {
+    const clearedWeek = buildClearedWeek(teamList);
     if (activeDay) {
-      const freshDay = buildDefault(teamList)[activeDay] || {
+      const freshDay = clearedWeek[activeDay] || {
         notes: "",
         holiday: false,
         staff: {}
@@ -4732,8 +5666,7 @@ function App() {
         [activeDay]: freshDay
       }));
     } else {
-      const fresh = buildDefault(teamList);
-      setWeekData(fresh);
+      setWeekData(clearedWeek);
     }
     isDirty.current = true;
     setHasUnsaved(true);
@@ -4993,8 +5926,19 @@ const handleTeamSave = (newList, newNextId) => {
     setTextSize(next.textSize);
     setDeptName(next.deptName);
     saveSettings(next).catch(err => {
+      if (err?.code === "auth") return;
       console.error("ONN Scheduler settings save error:", err);
     });
+  };
+  const handleIcsImport = async result => {
+    if (!result || !Array.isArray(result.updatedWeeks)) return;
+    if (!result.updatedWeeks.includes(skey(weekStart))) return;
+    const refreshed = await loadWeekWithCarryover(weekStart, teamList);
+    setWeekData(refreshed?.data || hydrateWeekData(buildDefault(teamList), teamList));
+    setEditMode(false);
+    setSaved(false);
+    setHasUnsaved(false);
+    isDirty.current = false;
   };
   return /*#__PURE__*/React.createElement(ThemeCtx.Provider, {
     value: lightMode
@@ -5009,6 +5953,10 @@ const handleTeamSave = (newList, newNextId) => {
     onns: teamList,
     onSave: handleTeamSave,
     onPreferencesSave: handlePreferencesSave,
+    onIcsImport: handleIcsImport,
+    authEnabled: authEnabled,
+    onLogout: onLogout,
+    hasUnsavedChanges: hasUnsaved,
     onClose: () => setShowSettings(false),
     lightMode: lightMode,
     setLightMode: setLightMode,
@@ -5019,16 +5967,14 @@ const handleTeamSave = (newList, newNextId) => {
     weekStart: weekStart,
     deptName: deptName,
     setDeptName: setDeptName,
-    deptName: deptName,
-	setDeptName: setDeptName,
-	nextId: teamNextId
+    nextId: teamNextId
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
       background: T.pageBg,
       fontFamily: "'DM Sans','Segoe UI',sans-serif",
       fontSize: textSize === 2 ? "18px" : textSize === 1 ? "16px" : "14px",
-      paddingBottom: "60px",
+      paddingBottom: isPhone ? "calc(28px + env(safe-area-inset-bottom, 0px))" : "60px",
       position: "relative"
     }
   }, /*#__PURE__*/React.createElement("style", null, `
@@ -5042,7 +5988,7 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       background: T.navBg,
       borderBottom: `1px solid ${T.navBorder}`,
-      padding: "0 28px",
+      padding: isPhone ? "8px 14px 10px" : `0 ${pagePad}`,
       position: "sticky",
       top: 0,
       zIndex: editMode ? 60 : 50
@@ -5051,16 +5997,20 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       maxWidth: "1700px",
       margin: "0 auto",
-      display: "grid",
-      gridTemplateColumns: "1fr auto 1fr",
-      alignItems: "center",
-      height: "62px"
+      display: isPhone ? "flex" : "grid",
+      flexDirection: isPhone ? "column" : undefined,
+      gridTemplateColumns: isPhone ? undefined : "1fr auto 1fr",
+      alignItems: isPhone ? "stretch" : "center",
+      gap: isPhone ? "10px" : 0,
+      minHeight: isPhone ? "auto" : "62px"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
-      gap: "12px"
+      gap: "12px",
+      justifyContent: isPhone ? "space-between" : "flex-start",
+      width: isPhone ? "100%" : undefined
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setLightMode(l => !l),
@@ -5103,7 +6053,10 @@ const handleTeamSave = (newList, newNextId) => {
       display: "flex",
       alignItems: "center",
       gap: "8px",
-      position: "relative"
+      position: "relative",
+      justifyContent: isPhone ? "center" : "flex-start",
+      flexWrap: isPhone ? "wrap" : "nowrap",
+      width: isPhone ? "100%" : undefined
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => navigateWeek(w => w - 1),
@@ -5112,7 +6065,7 @@ const handleTeamSave = (newList, newNextId) => {
     onClick: () => setShowJump(v => !v),
     style: {
       textAlign: "center",
-      minWidth: "150px",
+      minWidth: isPhone ? "120px" : "150px",
       background: "transparent",
       border: "none",
       cursor: "pointer",
@@ -5170,7 +6123,8 @@ const handleTeamSave = (newList, newNextId) => {
       padding: "14px 16px",
       zIndex: 200,
       boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
-      minWidth: "260px"
+      minWidth: isPhone ? "220px" : "260px",
+      maxWidth: isPhone ? "calc(100vw - 32px)" : "none"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5210,7 +6164,9 @@ const handleTeamSave = (newList, newNextId) => {
       display: "flex",
       gap: "6px",
       alignItems: "center",
-      justifyContent: "flex-end"
+      justifyContent: isPhone ? "center" : "flex-end",
+      flexWrap: "wrap",
+      width: isPhone ? "100%" : undefined
     }
   }, /*#__PURE__*/React.createElement("button", {
     title: ["Normal size", "Large text", "Extra large"][textSize],
@@ -5259,7 +6215,11 @@ const handleTeamSave = (newList, newNextId) => {
       setShowClearConfirm(false);
       loadWeekWithCarryover(weekStart, teamList).then(({
         data
-      }) => setWeekData(data || hydrateWeekData(buildDefault(teamList), teamList)));
+      }) => setWeekData(data || hydrateWeekData(buildDefault(teamList), teamList))).catch(err => {
+        if (err?.code !== "auth") {
+          console.error("ONN Scheduler week reload error:", err);
+        }
+      });
       setSaved(false);
       setHasUnsaved(false);
       isDirty.current = false;
@@ -5290,14 +6250,14 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       background: T.statsBg,
       borderBottom: `1px solid ${T.statsBorder}`,
-      padding: "10px 28px"
+      padding: `10px ${pagePad}`
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: "1700px",
       margin: "0 auto",
       display: "flex",
-      gap: "16px",
+      gap: isPhone ? "10px" : "16px",
       alignItems: "center",
       justifyContent: "center",
       flexWrap: "wrap",
@@ -5310,6 +6270,7 @@ const handleTeamSave = (newList, newNextId) => {
     color: "#94a3b8"
   }), /*#__PURE__*/React.createElement("div", {
     style: {
+      display: isPhone ? "none" : "block",
       width: "1px",
       height: "26px",
       background: lightMode ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"
@@ -5406,22 +6367,24 @@ const handleTeamSave = (newList, newNextId) => {
     title: activeDay ? "Clear all schedule entries for this day" : "Clear all schedule entries for this week"
   }, activeDay ? "Clear day" : "Clear week")))), /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "16px 28px 0",
+      padding: `16px ${pagePad} 0`,
       maxWidth: "1700px",
       margin: "0 auto"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      display: "grid",
-      gridTemplateColumns: "1fr auto 1fr",
+      display: isNarrowLayout ? "flex" : "grid",
+      flexDirection: isNarrowLayout ? "column" : undefined,
+      gridTemplateColumns: isNarrowLayout ? undefined : "1fr auto 1fr",
       marginBottom: "16px",
       alignItems: "center",
-      columnGap: "7px"
+      columnGap: "7px",
+      rowGap: isNarrowLayout ? "10px" : 0
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      justifyContent: "flex-start",
+      justifyContent: isNarrowLayout ? "center" : "flex-start",
       alignItems: "center",
       minHeight: "34px"
     }
@@ -5451,13 +6414,14 @@ const handleTeamSave = (newList, newNextId) => {
       display: "flex",
       gap: "7px",
       flexWrap: "wrap",
-      justifyContent: "center"
+      justifyContent: isNarrowLayout ? "flex-start" : "center"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: "7px",
-      flexWrap: "wrap"
+      flexWrap: "wrap",
+      justifyContent: isNarrowLayout ? "center" : "flex-start"
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setActiveDay(null),
@@ -5472,7 +6436,7 @@ const handleTeamSave = (newList, newNextId) => {
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      justifyContent: "flex-end"
+      justifyContent: isNarrowLayout ? "center" : "flex-end"
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: toggleAllDetails,
@@ -5481,7 +6445,7 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, rowExpandValue ? "Hide details" : "Show details")))), /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "0 28px",
+      padding: `0 ${pagePad}`,
       maxWidth: "1700px",
       margin: "0 auto"
     }
@@ -5500,7 +6464,8 @@ const handleTeamSave = (newList, newNextId) => {
   }, "⏳"), "Loading schedule…") : /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: "10px",
+      flexDirection: isNarrowLayout ? "column" : "row",
+      gap: isNarrowLayout ? "14px" : "10px",
       paddingBottom: "16px",
       alignItems: "stretch"
     }
@@ -5539,7 +6504,7 @@ const handleTeamSave = (newList, newNextId) => {
     });
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "18px 28px 0",
+      padding: `18px ${pagePad} 0`,
       maxWidth: "1700px",
       margin: "0 auto"
     }
@@ -5578,5 +6543,5 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, c.icon, " ", c.fullLabel)))))));
 }
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Root));
 </script></body></html>

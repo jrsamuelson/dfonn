@@ -19,6 +19,23 @@ This app now supports two storage modes without changing the schedule data shape
 
 It still supports a future injected backend via `window.onnStorageBackend`, which means the SharePoint path stays intact.
 
+## Shared password protection
+
+On Netlify Free, the site can use an app-level shared password instead of Netlify's paid visitor access feature.
+
+Set these environment variables in Netlify if you want to require a shared password before the scheduler can read or write shared data:
+
+- `ONN_SHARED_PASSWORD`: the shared site password staff will type into the login screen
+- `ONN_SESSION_SECRET`: optional but recommended separate signing secret for the login cookie
+
+If `ONN_SHARED_PASSWORD` is blank or unset, the app will stay open-access like it is now.
+
+Important behavior:
+
+- the static files are still publicly reachable, but the app will show a password screen and the Netlify storage function will reject unauthenticated reads and writes
+- local `file://` use still works without a password and keeps using `localStorage`
+- SharePoint remains a separate future backend path because auth is layered around the Netlify flow instead of changing the schedule data model
+
 Important behavior:
 
 - Local-only mode keeps data tied to the browser/device being used
@@ -33,6 +50,8 @@ If you want to test the shared backend locally instead of plain `localStorage`, 
 
 ```bash
 npm install
+export ONN_SHARED_PASSWORD="replace-me"
+export ONN_SESSION_SECRET="replace-me-too"
 netlify dev
 ```
 
