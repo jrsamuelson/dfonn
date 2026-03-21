@@ -5358,7 +5358,7 @@ function SharedPasswordGate({
       cursor: busy || !password.trim() ? "default" : "pointer",
       opacity: busy || !password.trim() ? 0.6 : 1
     }
-  }, busy ? "Signing in…" : "Sign in")));
+  }, busy ? "Signing in…" : "Sign in"))));
 }
 function Root() {
   const [authState, setAuthState] = React.useState({
