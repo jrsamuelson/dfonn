@@ -3,6 +3,7 @@
   const AUTH_ENDPOINT = "/.netlify/functions/onn-auth";
   const STORAGE_ENDPOINT = "/.netlify/functions/onn-storage";
   const WEEK_KEY_RE = /^onn_week5_\d{4}-\d{2}-\d{2}$/;
+  const WEEK_LOCK_KEY_RE = /^onn_week5_lock_\d{4}-\d{2}-\d{2}$/;
 
   function createLocalStorageBackend(namespace) {
     const keyFor = (key) => `${namespace}${key}`;
@@ -264,7 +265,7 @@
           "content-type": "text/plain; charset=utf-8",
         };
 
-        if (WEEK_KEY_RE.test(key) && etags.has(key)) {
+        if ((WEEK_KEY_RE.test(key) || WEEK_LOCK_KEY_RE.test(key)) && etags.has(key)) {
           const etag = etags.get(key);
 
           if (etag) {

@@ -13,6 +13,7 @@ const EXACT_KEYS = new Set([
   "onn_settings_v1",
 ]);
 const WEEK_KEY_RE = /^onn_week5_\d{4}-\d{2}-\d{2}$/;
+const WEEK_LOCK_KEY_RE = /^onn_week5_lock_\d{4}-\d{2}-\d{2}$/;
 
 function json(body, init = {}, config = getAuthConfig()) {
   const headers = new Headers(init.headers || {});
@@ -35,7 +36,7 @@ function errorResponse(status, message, config = getAuthConfig(), extraHeaders =
 }
 
 function isAllowedKey(key) {
-  return EXACT_KEYS.has(key) || WEEK_KEY_RE.test(key);
+  return EXACT_KEYS.has(key) || WEEK_KEY_RE.test(key) || WEEK_LOCK_KEY_RE.test(key);
 }
 
 function isAllowedPrefix(prefix) {

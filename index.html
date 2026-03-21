@@ -582,6 +582,106 @@ async function saveSettings(s) {
 }
 
 const skey = (ws) => `onn_week5_${ws.toISOString().slice(0, 10)}`;
+const lkey = (ws) => `onn_week5_lock_${ws.toISOString().slice(0, 10)}`;
+const EDIT_LOCK_TTL_MS = 90 * 1000;
+const EDIT_LOCK_RENEW_MS = 30 * 1000;
+const RECENT_EDIT_WINDOW_MS = 10 * 60 * 1000;
+
+function getEditSessionId() {
+  const fallback = `onn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    if (typeof window === "undefined" || !window.sessionStorage) return fallback;
+    const existing = window.sessionStorage.getItem("onn_edit_session_id");
+    if (existing) return existing;
+    window.sessionStorage.setItem("onn_edit_session_id", fallback);
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function isEditLockActive(lock, now = Date.now()) {
+  const expiresAt = Date.parse(lock?.expiresAt || "");
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
+function formatRelativeTime(value) {
+  const ts = Date.parse(value || "");
+  if (!Number.isFinite(ts)) return "";
+  const diffMs = ts - Date.now();
+  const absMs = Math.abs(diffMs);
+  if (absMs < 45 * 1000) return diffMs >= 0 ? "in a few seconds" : "just now";
+  if (absMs < 60 * 60 * 1000) {
+    const mins = Math.round(absMs / (60 * 1000));
+    return diffMs >= 0 ? `in ${mins} min` : `${mins} min ago`;
+  }
+  const hours = Math.round(absMs / (60 * 60 * 1000));
+  return diffMs >= 0 ? `in ${hours} hr` : `${hours} hr ago`;
+}
+
+async function loadWeekLock(ws) {
+  return await StorageAdapter.get(lkey(ws));
+}
+
+async function releaseEditLock(ws, sessionId) {
+  const existing = await loadWeekLock(ws);
+  if (!existing || existing.sessionId !== sessionId) return false;
+  await StorageAdapter.remove(lkey(ws));
+  return true;
+}
+
+async function tryAcquireEditLock(ws, sessionId, opts = {}) {
+  const force = !!opts.force;
+  const now = Date.now();
+  const existing = await loadWeekLock(ws);
+  const activeOther = existing && existing.sessionId !== sessionId && isEditLockActive(existing, now);
+
+  if (activeOther && !force) {
+    return {
+      ok: false,
+      reason: "locked",
+      lock: existing
+    };
+  }
+
+  const nextLock = {
+    sessionId,
+    acquiredAt: existing?.sessionId === sessionId && existing?.acquiredAt ? existing.acquiredAt : new Date(now).toISOString(),
+    lastSeenAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + EDIT_LOCK_TTL_MS).toISOString()
+  };
+
+  try {
+    await StorageAdapter.set(lkey(ws), nextLock);
+  } catch (err) {
+    if (err?.code === "conflict") {
+      const latest = await loadWeekLock(ws);
+      return latest?.sessionId === sessionId ? {
+        ok: true,
+        lock: latest
+      } : {
+        ok: false,
+        reason: "locked",
+        lock: latest || existing || null
+      };
+    }
+    throw err;
+  }
+
+  const confirmed = await loadWeekLock(ws);
+  if (confirmed?.sessionId === sessionId) {
+    return {
+      ok: true,
+      lock: confirmed
+    };
+  }
+
+  return {
+    ok: false,
+    reason: "locked",
+    lock: confirmed || null
+  };
+}
 
 async function loadWeek(ws) {
   return await StorageAdapter.get(skey(ws));
@@ -5501,6 +5601,11 @@ function App({
   const [deptName, setDeptName] = useState("Oncology Nurse Navigator");
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [weekActivity, setWeekActivity] = React.useState({
+    lock: null,
+    savedAt: ""
+  });
+  const editSessionIdRef = React.useRef(getEditSessionId());
   const FS = textSize === 2 ? 1.4 : textSize === 1 ? 1.2 : 1;
   const viewportWidth = useViewportWidth();
   const isPhone = viewportWidth <= 640;
@@ -5508,9 +5613,19 @@ function App({
   const pagePad = isPhone ? "14px" : isNarrowLayout ? "18px" : "28px";
   const weekStart = getWeekStart(weekOffset);
   const weekDates = getWeekDates(weekStart);
+  const refreshWeekActivity = React.useCallback(async () => {
+    const [lock, rawWeek] = await Promise.all([loadWeekLock(weekStart), loadWeek(weekStart)]);
+    setWeekActivity({
+      lock: lock && typeof lock === "object" ? lock : null,
+      savedAt: rawWeek?._meta?.savedAt || ""
+    });
+  }, [weekStart]);
   const confirmDiscardUnsaved = () => window.confirm("You have unsaved schedule edits for this week. Discard them and continue?");
   const navigateWeek = next => {
     if (editMode && hasUnsaved && !confirmDiscardUnsaved()) return;
+    if (editMode) {
+      void releaseEditLock(weekStart, editSessionIdRef.current);
+    }
     setWeekOffset(next);
     setActiveDay(prev => prev === null ? null : "Monday");
   };
@@ -5644,6 +5759,64 @@ function App({
     };
   }, [weekOffset, teamList, teamLoaded]);
   useEffect(() => {
+    if (!teamLoaded) return;
+    let cancelled = false;
+    const update = async () => {
+      const [lock, rawWeek] = await Promise.all([loadWeekLock(weekStart), loadWeek(weekStart)]);
+      if (cancelled) return;
+      setWeekActivity({
+        lock: lock && typeof lock === "object" ? lock : null,
+        savedAt: rawWeek?._meta?.savedAt || ""
+      });
+    };
+    update().catch(err => {
+      if (!cancelled && err?.code !== "auth") {
+        console.error("ONN Scheduler activity load error:", err);
+      }
+    });
+    const timer = window.setInterval(() => {
+      update().catch(err => {
+        if (err?.code !== "auth") {
+          console.error("ONN Scheduler activity refresh error:", err);
+        }
+      });
+    }, EDIT_LOCK_RENEW_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [weekStart, teamLoaded]);
+  useEffect(() => {
+    if (!editMode) return;
+    let cancelled = false;
+    const renew = async () => {
+      const result = await tryAcquireEditLock(weekStart, editSessionIdRef.current);
+      if (!cancelled && !result.ok && result.lock?.sessionId !== editSessionIdRef.current) {
+        setSaveError("Someone else is editing this week right now. Wait for them to finish, or cancel and reload before saving.");
+      }
+      if (!cancelled) {
+        await refreshWeekActivity();
+      }
+    };
+    renew().catch(err => {
+      if (!cancelled && err?.code !== "auth") {
+        console.error("ONN Scheduler edit lock renew error:", err);
+      }
+    });
+    const timer = window.setInterval(() => {
+      renew().catch(err => {
+        if (err?.code !== "auth") {
+          console.error("ONN Scheduler edit lock refresh error:", err);
+        }
+      });
+    }, EDIT_LOCK_RENEW_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      void releaseEditLock(weekStart, editSessionIdRef.current);
+    };
+  }, [editMode, weekStart, refreshWeekActivity]);
+  useEffect(() => {
     const warnOnUnload = e => {
       if (!editMode || !hasUnsaved) return;
       e.preventDefault();
@@ -5675,16 +5848,48 @@ function App({
   };
   const clearScopeNoun = activeDay ? "day" : "week";
   const [saveError, setSaveError] = React.useState(null);
+  const beginEditMode = async (force = false) => {
+    setSaveError(null);
+    const result = await tryAcquireEditLock(weekStart, editSessionIdRef.current, {
+      force
+    });
+    await refreshWeekActivity();
+    if (!result.ok) {
+      const lastActive = formatRelativeTime(result.lock?.lastSeenAt || result.lock?.acquiredAt || "");
+      if (!force) {
+        const confirmed = window.confirm(`Someone is editing this week right now${lastActive ? ` (${lastActive})` : ""}. Take over editing anyway?`);
+        if (confirmed) {
+          return beginEditMode(true);
+        }
+      }
+      return;
+    }
+    setRowExpandValue(false);
+    setRowExpandSignal(s => s + 1);
+    setEditMode(true);
+    setSaved(false);
+  };
   const handleSave = async () => {
     if (!hasUnsaved) {
       // Nothing changed—don’t persist this week (prevents freezing predictions).
+      await releaseEditLock(weekStart, editSessionIdRef.current);
+      await refreshWeekActivity();
       setEditMode(false);
       return;
     }
     setSaving(true);
     setSaveError(null);
     try {
+      const lockResult = await tryAcquireEditLock(weekStart, editSessionIdRef.current);
+      if (!lockResult.ok) {
+        setSaving(false);
+        setSaveError("Someone else is editing this week right now. Wait for them to finish, or cancel and reload before saving.");
+        await refreshWeekActivity();
+        return;
+      }
       await saveWeek(weekStart, weekData);
+      await releaseEditLock(weekStart, editSessionIdRef.current);
+      await refreshWeekActivity();
       isDirty.current = false;
       setHasUnsaved(false);
       setSaving(false);
@@ -5884,6 +6089,16 @@ function App({
     remote: "WFH shifts"
   };
   const displayed = activeDay ? [activeDay] : DAYS;
+  const activeWeekLock = weekActivity.lock && isEditLockActive(weekActivity.lock) ? weekActivity.lock : null;
+  const activeExternalWeekLock = !!activeWeekLock && activeWeekLock.sessionId !== editSessionIdRef.current;
+  const recentlyEdited = !!weekActivity.savedAt && Date.now() - Date.parse(weekActivity.savedAt) < RECENT_EDIT_WINDOW_MS;
+  const activityBanner = activeExternalWeekLock ? {
+    tone: "warn",
+    text: `Someone is editing this week right now. Last active ${formatRelativeTime(activeWeekLock.lastSeenAt || activeWeekLock.acquiredAt)}.`
+  } : !editMode && recentlyEdited ? {
+    tone: "info",
+    text: `Recently saved ${formatRelativeTime(weekActivity.savedAt)}.`
+  } : null;
 const handleTeamSave = (newList, newNextId) => {
   const sorted = sortONNs(normalizeTeam(newList));
   setTeamList(sorted);
@@ -6205,6 +6420,11 @@ const handleTeamSave = (newList, newNextId) => {
   }, saveError), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (hasUnsaved && !confirmDiscardUnsaved()) return;
+      void releaseEditLock(weekStart, editSessionIdRef.current).then(() => refreshWeekActivity()).catch(err => {
+        if (err?.code !== "auth") {
+          console.error("ONN Scheduler edit lock release error:", err);
+        }
+      });
       setEditMode(false);
       setShowClearConfirm(false);
       loadWeekWithCarryover(weekStart, teamList).then(({
@@ -6236,14 +6456,15 @@ const handleTeamSave = (newList, newNextId) => {
     },
 	disabled: saving
   }, saving ? "Saving…" : saved ? "Saved" : "Save Edits")) : /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setRowExpandValue(false);
-      setRowExpandSignal(s => s + 1);
-      setEditMode(true);
-      setSaved(false);
-    },
-    style: NBTN(lightMode, true)
-  }, "Edit Schedule")))), /*#__PURE__*/React.createElement("div", {
+    onClick: () => beginEditMode(),
+    style: {
+      ...NBTN(lightMode, true),
+      ...(activeExternalWeekLock ? {
+        background: lightMode ? "#fed7aa" : "rgba(217,119,6,0.24)",
+        color: lightMode ? "#9a3412" : "#fdba74"
+      } : {})
+    }
+  }, activeExternalWeekLock ? "Take Over Edit" : "Edit Schedule")))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.statsBg,
       borderBottom: `1px solid ${T.statsBorder}`,
@@ -6440,7 +6661,24 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       ...NBTN(lightMode)
     }
-  }, rowExpandValue ? "Hide details" : "Show details")))), /*#__PURE__*/React.createElement("div", {
+  }, rowExpandValue ? "Hide details" : "Show details")))), activityBanner && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: `0 ${pagePad} 12px`,
+      maxWidth: "1700px",
+      margin: "0 auto"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "11px 14px",
+      borderRadius: "14px",
+      border: activityBanner.tone === "warn" ? "1px solid rgba(217,119,6,0.28)" : `1px solid ${lightMode ? "rgba(59,130,246,0.18)" : "rgba(148,163,184,0.18)"}`,
+      background: activityBanner.tone === "warn" ? lightMode ? "#fff7ed" : "rgba(180,83,9,0.18)" : lightMode ? "#eff6ff" : "rgba(30,41,59,0.9)",
+      color: activityBanner.tone === "warn" ? lightMode ? "#9a3412" : "#fdba74" : lightMode ? "#1d4ed8" : "#bfdbfe",
+      fontSize: "12px",
+      fontWeight: 700,
+      lineHeight: 1.5
+    }
+  }, activityBanner.text)), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: `0 ${pagePad}`,
       maxWidth: "1700px",
