@@ -624,29 +624,14 @@ async function loadWeekLock(ws) {
 }
 
 async function releaseEditLock(ws, sessionId) {
-  const existing = await loadWeekLock(ws);
-  if (!existing || existing.sessionId !== sessionId) return false;
-  await StorageAdapter.remove(lkey(ws));
   return true;
 }
 
 async function tryAcquireEditLock(ws, sessionId, opts = {}) {
-  const force = !!opts.force;
   const now = Date.now();
-  const existing = await loadWeekLock(ws);
-  const activeOther = existing && existing.sessionId !== sessionId && isEditLockActive(existing, now);
-
-  if (activeOther && !force) {
-    return {
-      ok: false,
-      reason: "locked",
-      lock: existing
-    };
-  }
-
   const nextLock = {
     sessionId,
-    acquiredAt: existing?.sessionId === sessionId && existing?.acquiredAt ? existing.acquiredAt : new Date(now).toISOString(),
+    acquiredAt: new Date(now).toISOString(),
     lastSeenAt: new Date(now).toISOString(),
     expiresAt: new Date(now + EDIT_LOCK_TTL_MS).toISOString()
   };
@@ -656,30 +641,16 @@ async function tryAcquireEditLock(ws, sessionId, opts = {}) {
   } catch (err) {
     if (err?.code === "conflict") {
       const latest = await loadWeekLock(ws);
-      return latest?.sessionId === sessionId ? {
+      return {
         ok: true,
-        lock: latest
-      } : {
-        ok: false,
-        reason: "locked",
-        lock: latest || existing || null
+        lock: latest && typeof latest === "object" ? latest : nextLock
       };
     }
     throw err;
   }
-
-  const confirmed = await loadWeekLock(ws);
-  if (confirmed?.sessionId === sessionId) {
-    return {
-      ok: true,
-      lock: confirmed
-    };
-  }
-
   return {
-    ok: false,
-    reason: "locked",
-    lock: confirmed || null
+    ok: true,
+    lock: nextLock
   };
 }
 
@@ -5790,10 +5761,7 @@ function App({
     if (!editMode) return;
     let cancelled = false;
     const renew = async () => {
-      const result = await tryAcquireEditLock(weekStart, editSessionIdRef.current);
-      if (!cancelled && !result.ok && result.lock?.sessionId !== editSessionIdRef.current) {
-        setSaveError("Someone else is editing this week right now. Wait for them to finish, or cancel and reload before saving.");
-      }
+      await tryAcquireEditLock(weekStart, editSessionIdRef.current);
       if (!cancelled) {
         await refreshWeekActivity();
       }
@@ -5848,22 +5816,10 @@ function App({
   };
   const clearScopeNoun = activeDay ? "day" : "week";
   const [saveError, setSaveError] = React.useState(null);
-  const beginEditMode = async (force = false) => {
+  const beginEditMode = async () => {
     setSaveError(null);
-    const result = await tryAcquireEditLock(weekStart, editSessionIdRef.current, {
-      force
-    });
+    await tryAcquireEditLock(weekStart, editSessionIdRef.current);
     await refreshWeekActivity();
-    if (!result.ok) {
-      const lastActive = formatRelativeTime(result.lock?.lastSeenAt || result.lock?.acquiredAt || "");
-      if (!force) {
-        const confirmed = window.confirm(`Someone is editing this week right now${lastActive ? ` (${lastActive})` : ""}. Take over editing anyway?`);
-        if (confirmed) {
-          return beginEditMode(true);
-        }
-      }
-      return;
-    }
     setRowExpandValue(false);
     setRowExpandSignal(s => s + 1);
     setEditMode(true);
@@ -5880,13 +5836,7 @@ function App({
     setSaving(true);
     setSaveError(null);
     try {
-      const lockResult = await tryAcquireEditLock(weekStart, editSessionIdRef.current);
-      if (!lockResult.ok) {
-        setSaving(false);
-        setSaveError("Someone else is editing this week right now. Wait for them to finish, or cancel and reload before saving.");
-        await refreshWeekActivity();
-        return;
-      }
+      await tryAcquireEditLock(weekStart, editSessionIdRef.current);
       await saveWeek(weekStart, weekData);
       await releaseEditLock(weekStart, editSessionIdRef.current);
       await refreshWeekActivity();
@@ -6090,14 +6040,17 @@ function App({
   };
   const displayed = activeDay ? [activeDay] : DAYS;
   const activeWeekLock = weekActivity.lock && isEditLockActive(weekActivity.lock) ? weekActivity.lock : null;
-  const activeExternalWeekLock = !!activeWeekLock && activeWeekLock.sessionId !== editSessionIdRef.current;
+  const recentWeekVisitAt = activeWeekLock?.lastSeenAt || activeWeekLock?.acquiredAt || "";
+  const hasRecentWeekVisit = !!recentWeekVisitAt && Date.now() - Date.parse(recentWeekVisitAt) < RECENT_EDIT_WINDOW_MS;
   const recentlyEdited = !!weekActivity.savedAt && Date.now() - Date.parse(weekActivity.savedAt) < RECENT_EDIT_WINDOW_MS;
-  const activityBanner = activeExternalWeekLock ? {
-    tone: "warn",
-    text: `Someone is editing this week right now. Last active ${formatRelativeTime(activeWeekLock.lastSeenAt || activeWeekLock.acquiredAt)}.`
-  } : !editMode && recentlyEdited ? {
+  const savedAtTs = Date.parse(weekActivity.savedAt || "");
+  const visitedAtTs = Date.parse(recentWeekVisitAt || "");
+  const activityBanner = !editMode && recentlyEdited && (!hasRecentWeekVisit || !Number.isFinite(visitedAtTs) || savedAtTs >= visitedAtTs) ? {
     tone: "info",
-    text: `Recently saved ${formatRelativeTime(weekActivity.savedAt)}.`
+    text: `This week was saved ${formatRelativeTime(weekActivity.savedAt)}.`
+  } : !editMode && hasRecentWeekVisit ? {
+    tone: "info",
+    text: `This week was opened ${formatRelativeTime(recentWeekVisitAt)}.`
   } : null;
 const handleTeamSave = (newList, newNextId) => {
   const sorted = sortONNs(normalizeTeam(newList));
@@ -6458,13 +6411,9 @@ const handleTeamSave = (newList, newNextId) => {
   }, saving ? "Saving…" : saved ? "Saved" : "Save Edits")) : /*#__PURE__*/React.createElement("button", {
     onClick: () => beginEditMode(),
     style: {
-      ...NBTN(lightMode, true),
-      ...(activeExternalWeekLock ? {
-        background: lightMode ? "#fed7aa" : "rgba(217,119,6,0.24)",
-        color: lightMode ? "#9a3412" : "#fdba74"
-      } : {})
+      ...NBTN(lightMode, true)
     }
-  }, activeExternalWeekLock ? "Take Over Edit" : "Edit Schedule")))), /*#__PURE__*/React.createElement("div", {
+  }, "Edit Schedule")))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.statsBg,
       borderBottom: `1px solid ${T.statsBorder}`,
