@@ -427,7 +427,7 @@ function buildIncomingCoverage(dayData, teamOnns) {
 // Keys used by this app:
 //   onn_week5_YYYY-MM-DD   (weekly schedule data)
 //   onn_team_v2            (team roster)
-//   onn_settings_v1        (preferences: lightMode, textSize, deptName)
+//   onn_settings_v1        (preferences: lightMode, textSize, deptName, assistantEnabled)
 //   onn_team_nextid_v1     (high-water mark for future team IDs)
 //
 // IT checklist:
@@ -504,9 +504,9 @@ const StorageAdapter = (() => {
     },
 
     async get(key) {
+      const r = await backend.get(key);
+      if (!r || !r.value) return null;
       try {
-        const r = await backend.get(key);
-        if (!r || !r.value) return null;
         return JSON.parse(r.value);
       } catch {
         return null;
@@ -529,12 +529,8 @@ const StorageAdapter = (() => {
     },
 
     async keys(prefix = "") {
-      try {
-        const r = await backend.list(prefix);
-        return normalizeListResult(r);
-      } catch {
-        return [];
-      }
+      const r = await backend.list(prefix);
+      return normalizeListResult(r);
     },
   };
 })();
@@ -4216,6 +4212,373 @@ function MonthBtn({
     }
   }, label);
 }
+function ScheduleAssistant() {
+  const lightMode = useTheme();
+  const viewportWidth = useViewportWidth();
+  const isPhone = viewportWidth <= 640;
+  const [expanded, setExpanded] = React.useState(false);
+  const bubbleBg = lightMode ? "rgba(255,255,255,0.97)" : "rgba(15,23,42,0.97)";
+  const bubbleBorder = lightMode ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(148,163,184,0.22)";
+  const bubbleText = lightMode ? "#0f172a" : "#f8fafc";
+  const bubbleSub = lightMode ? "#64748b" : "#94a3b8";
+  const launcherWidth = isPhone ? "74px" : "84px";
+  const launcherHeight = isPhone ? "96px" : "108px";
+  const eyeShell = extra => ({
+    position: "absolute",
+    width: isPhone ? "24px" : "28px",
+    height: isPhone ? "24px" : "28px",
+    borderRadius: "999px",
+    background: "#fff",
+    boxShadow: "0 6px 12px rgba(15,23,42,0.18)",
+    zIndex: 4,
+    ...extra
+  });
+  const pupilStyle = extra => ({
+    position: "absolute",
+    width: isPhone ? "10px" : "12px",
+    height: isPhone ? "10px" : "12px",
+    borderRadius: "999px",
+    background: "#111827",
+    ...extra
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      right: isPhone ? "max(6px, env(safe-area-inset-right, 0px))" : "14px",
+      bottom: isPhone ? "max(6px, env(safe-area-inset-bottom, 0px))" : "18px",
+      zIndex: 120,
+      width: 0,
+      height: 0,
+      pointerEvents: "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "relative",
+      width: 0,
+      height: 0,
+      pointerEvents: "none"
+    }
+  }, expanded && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      right: isPhone ? "12px" : "18px",
+      bottom: isPhone ? "84px" : "90px",
+      width: isPhone ? "min(280px, calc(100vw - 112px))" : "308px",
+      padding: "14px 16px",
+      borderRadius: "18px",
+      background: bubbleBg,
+      border: bubbleBorder,
+      boxShadow: lightMode ? "0 20px 45px rgba(79,70,229,0.16)" : "0 24px 50px rgba(2,6,23,0.55)",
+      color: bubbleText,
+      pointerEvents: "auto",
+      backdropFilter: "blur(14px)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      right: "22px",
+      bottom: "-8px",
+      width: "16px",
+      height: "16px",
+      background: bubbleBg,
+      borderRight: bubbleBorder,
+      borderBottom: bubbleBorder,
+      transform: "rotate(45deg)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      gap: "10px",
+      alignItems: "flex-start"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: null
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "11px",
+      fontWeight: 800,
+      letterSpacing: "0.08em",
+      textTransform: "uppercase",
+      color: lightMode ? "#7c3aed" : "#c4b5fd",
+      marginBottom: "6px"
+    }
+  }, "Schedule Sidekick"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: isPhone ? "14px" : "15px",
+      lineHeight: 1.45,
+      fontWeight: 700
+    }
+  }, "It looks like schedule-building is underway. Need a hand with that?"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: "8px",
+      fontSize: "12px",
+      lineHeight: 1.45,
+      color: bubbleSub
+    }
+  }, "Hide me anytime in Settings > Preferences.")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setExpanded(false),
+    title: "Dismiss helper",
+    style: {
+      border: "none",
+      background: lightMode ? "rgba(99,102,241,0.08)" : "rgba(255,255,255,0.08)",
+      color: lightMode ? "#6366f1" : "#cbd5e1",
+      width: "28px",
+      height: "28px",
+      borderRadius: "999px",
+      cursor: "pointer",
+      fontSize: "15px",
+      fontWeight: 700,
+      lineHeight: 1,
+      flexShrink: 0
+    }
+  }, "×")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setExpanded(false),
+    style: {
+      marginTop: "12px",
+      padding: "8px 12px",
+      borderRadius: "10px",
+      border: "none",
+      background: lightMode ? "#eef2ff" : "rgba(99,102,241,0.24)",
+      color: lightMode ? "#4338ca" : "#c7d2fe",
+      fontFamily: "inherit",
+      fontSize: "12px",
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "Not now")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setExpanded(v => !v),
+    title: expanded ? "Hide helper bubble" : "Show helper bubble",
+    "aria-label": expanded ? "Hide schedule sidekick" : "Show schedule sidekick",
+    style: {
+      position: "absolute",
+      right: 0,
+      bottom: 0,
+      width: launcherWidth,
+      height: launcherHeight,
+      border: "none",
+      background: "transparent",
+      cursor: "pointer",
+      pointerEvents: "auto",
+      padding: 0,
+      overflow: "visible",
+      touchAction: "manipulation"
+    }
+  }, !expanded && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: isPhone ? "4px" : "2px",
+      right: isPhone ? "18px" : "22px",
+      padding: "4px 8px",
+      borderRadius: "999px",
+      background: lightMode ? "rgba(255,255,255,0.95)" : "rgba(15,23,42,0.95)",
+      border: bubbleBorder,
+      color: bubbleText,
+      fontSize: "10px",
+      fontWeight: 700,
+      boxShadow: lightMode ? "0 10px 25px rgba(79,70,229,0.14)" : "0 10px 25px rgba(2,6,23,0.45)"
+    }
+  }, "Need help?"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      inset: 0,
+      animation: "onnBuddyFloat 3.8s ease-in-out infinite",
+      transformOrigin: "50% 75%",
+      pointerEvents: "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: isPhone ? "8px" : "10px",
+      top: isPhone ? "34px" : "40px",
+      width: isPhone ? "62px" : "72px",
+      height: isPhone ? "56px" : "64px",
+      borderRadius: "10px",
+      background: "repeating-linear-gradient(180deg,#fef3c7 0 7px,#d6d384 7px 8px)",
+      border: "1px solid rgba(180,150,38,0.45)",
+      boxShadow: "0 12px 22px rgba(15,23,42,0.12)",
+      transform: "rotate(-12deg)",
+      overflow: "hidden",
+      zIndex: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: "10px",
+      top: 0,
+      bottom: 0,
+      width: "2px",
+      background: "rgba(220,38,38,0.22)"
+    }
+  })), /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 120 150",
+    style: {
+      width: "100%",
+      height: "100%",
+      overflow: "visible",
+      position: "relative",
+      zIndex: 1
+    }
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M78 16c22 0 34 16 34 36v53c0 28-19 46-45 46-24 0-41-16-41-39V58c0-18 12-30 29-30s28 11 28 27v49c0 10-6 17-15 17s-15-7-15-17V67",
+    fill: "none",
+    stroke: lightMode ? "#8b80d9" : "#c4b5fd",
+    strokeWidth: "10",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M82 20c16 3 24 15 24 32v53c0 24-16 39-38 39",
+    fill: "none",
+    stroke: lightMode ? "rgba(255,255,255,0.68)" : "rgba(255,255,255,0.4)",
+    strokeWidth: "4",
+    strokeLinecap: "round"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: isPhone ? "12px" : "14px",
+      top: isPhone ? "8px" : "10px",
+      width: isPhone ? "52px" : "58px",
+      height: isPhone ? "74px" : "82px",
+      borderRadius: "30px 30px 24px 24px",
+      background: "linear-gradient(180deg,#7c4a34 0%,#633827 60%,#4d2b1d 100%)",
+      boxShadow: "0 10px 24px rgba(15,23,42,0.16), inset 0 2px 0 rgba(255,255,255,0.12)",
+      overflow: "hidden",
+      border: "2px solid rgba(255,255,255,0.82)",
+      zIndex: 2
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      height: "24%",
+      background: "linear-gradient(180deg,#111111 0%,#202020 100%)",
+      borderRadius: "32px 32px 13px 13px"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: "7px",
+      left: "15px",
+      width: "20px",
+      height: "12px",
+      borderRadius: "999px",
+      background: "rgba(255,255,255,0.12)",
+      filter: "blur(2px)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: "50%",
+      top: "55px",
+      width: "3px",
+      height: "5px",
+      marginLeft: "-1.5px",
+      borderRadius: "999px",
+      background: "rgba(98,60,41,0.7)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: "50%",
+      top: "60px",
+      width: "5px",
+      height: "2px",
+      marginLeft: "-2.5px",
+      borderTop: "1.5px solid rgba(103,62,43,0.56)",
+      borderRadius: "999px"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: "50%",
+      top: "62px",
+      width: "24px",
+      height: "11px",
+      marginLeft: "-12px",
+      borderBottom: "2px solid #f6e2d8",
+      borderRadius: "0 0 999px 999px"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: "50%",
+      top: "65px",
+      width: "18px",
+      height: "7px",
+      marginLeft: "-9px",
+      borderRadius: "0 0 999px 999px",
+      background: "rgba(255,255,255,0.95)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      left: "8px",
+      top: "56px",
+      width: "10px",
+      height: "7px",
+      borderRadius: "999px",
+      background: "rgba(255,255,255,0.08)",
+      filter: "blur(1px)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      right: "8px",
+      top: "56px",
+      width: "10px",
+      height: "7px",
+      borderRadius: "999px",
+      background: "rgba(255,255,255,0.08)",
+      filter: "blur(1px)"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: eyeShell({
+      top: isPhone ? "38px" : "42px",
+      left: isPhone ? "10px" : "12px"
+    })
+  }, /*#__PURE__*/React.createElement("div", {
+    style: pupilStyle({
+      left: isPhone ? "7px" : "8px",
+      top: isPhone ? "7px" : "8px"
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    style: eyeShell({
+      top: isPhone ? "40px" : "44px",
+      left: isPhone ? "40px" : "44px"
+    })
+  }, /*#__PURE__*/React.createElement("div", {
+    style: pupilStyle({
+      right: isPhone ? "6px" : "7px",
+      top: isPhone ? "8px" : "9px"
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: isPhone ? "31px" : "34px",
+      left: isPhone ? "6px" : "8px",
+      width: isPhone ? "24px" : "28px",
+      height: "12px",
+      borderTop: "5px solid #111827",
+      borderRadius: "999px",
+      transform: "rotate(-16deg)",
+      zIndex: 5
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: isPhone ? "31px" : "34px",
+      left: isPhone ? "44px" : "48px",
+      width: isPhone ? "24px" : "28px",
+      height: "12px",
+      borderTop: "5px solid #111827",
+      borderRadius: "999px",
+      transform: "rotate(16deg)",
+      zIndex: 5
+    }
+  })))));
+}
 function EmbeddedTeamManager({
   onns,
   onSave,
@@ -4742,6 +5105,8 @@ function SettingsModal({
   weekStart,
   deptName,
   setDeptName,
+  assistantEnabled,
+  setAssistantEnabled,
   nextId
 }) {
   const lm = lightMode;
@@ -4758,16 +5123,19 @@ function SettingsModal({
   const [prefLightMode, setPrefLightMode] = React.useState(lightMode);
   const [prefTextSize, setPrefTextSize] = React.useState(textSize);
   const [prefDeptName, setPrefDeptName] = React.useState(deptName);
+  const [prefAssistantEnabled, setPrefAssistantEnabled] = React.useState(assistantEnabled);
   const icsFileRef = React.useRef(null);
   const initialPrefsRef = React.useRef({
     lightMode,
     textSize,
-    deptName
+    deptName,
+    assistantEnabled
   });
   const closeWithoutSavingPrefs = () => {
     setLightMode(initialPrefsRef.current.lightMode);
     setTextSize(initialPrefsRef.current.textSize);
     setDeptName(initialPrefsRef.current.deptName);
+    setAssistantEnabled(initialPrefsRef.current.assistantEnabled);
     onClose();
   };
   const handleExport = async () => {
@@ -5071,6 +5439,37 @@ function SettingsModal({
     }
   })), /*#__PURE__*/React.createElement("div", {
     style: settingRow
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: settingLabel
+  }, "Scheduling sidekick"), /*#__PURE__*/React.createElement("div", {
+    style: settingDesc
+  }, "Shows the Clippy-style helper in the corner. Close it there for now, or hide it here.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: "4px",
+      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.07)",
+      borderRadius: "8px",
+      padding: "3px"
+    }
+  }, [[true, "Show"], [false, "Hide"]].map(([val, label]) => /*#__PURE__*/React.createElement("button", {
+    key: label,
+    onClick: () => {
+      setPrefAssistantEnabled(val);
+      setAssistantEnabled(val);
+    },
+    style: {
+      padding: "6px 14px",
+      borderRadius: "6px",
+      border: "none",
+      fontFamily: "inherit",
+      fontWeight: 600,
+      fontSize: "12px",
+      cursor: "pointer",
+      background: prefAssistantEnabled === val ? lm ? "#fff" : "rgba(255,255,255,0.15)" : "transparent",
+      color: prefAssistantEnabled === val ? lm ? "#1e293b" : "#fff" : lm ? "#64748b" : "#94a3b8"
+    }
+  }, label)))), /*#__PURE__*/React.createElement("div", {
+    style: settingRow
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
@@ -5262,11 +5661,13 @@ function SettingsModal({
         const next = {
           lightMode: !!prefLightMode,
           textSize: [0, 1, 2].includes(Number(prefTextSize)) ? Number(prefTextSize) : 0,
-          deptName: (prefDeptName || "").trim() || "Oncology Nurse Navigator"
+          deptName: (prefDeptName || "").trim() || "Oncology Nurse Navigator",
+          assistantEnabled: prefAssistantEnabled !== false
         };
         setLightMode(next.lightMode);
         setTextSize(next.textSize);
         setDeptName(next.deptName);
+        setAssistantEnabled(next.assistantEnabled);
         if (typeof onPreferencesSave === "function") onPreferencesSave(next);
         onClose();
         return;
@@ -5570,6 +5971,7 @@ function App({
   const [rowExpandSignal, setRowExpandSignal] = useState(0);
   const [rowExpandValue, setRowExpandValue] = useState(false);
   const [deptName, setDeptName] = useState("Oncology Nurse Navigator");
+  const [assistantEnabled, setAssistantEnabled] = useState(true);
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [weekActivity, setWeekActivity] = React.useState({
@@ -5616,6 +6018,7 @@ function App({
       const savedTextSize = Number(saved.textSize);
       if ([0, 1, 2].includes(savedTextSize)) setTextSize(savedTextSize);
       if (typeof saved.deptName === "string" && saved.deptName.trim()) setDeptName(saved.deptName.trim());
+      if (typeof saved.assistantEnabled === "boolean") setAssistantEnabled(saved.assistantEnabled);
     }).catch(err => {
       if (cancelled || err?.code === "auth") return;
       console.error("ONN Scheduler settings load error:", err);
@@ -5631,12 +6034,13 @@ function App({
     saveSettings({
       lightMode,
       textSize,
-      deptName
+      deptName,
+      assistantEnabled
     }).catch(err => {
       if (err?.code === "auth") return;
       console.error("ONN Scheduler settings save error:", err);
     });
-  }, [settingsLoaded, showSettings, lightMode, textSize, deptName]);
+  }, [settingsLoaded, showSettings, lightMode, textSize, deptName, assistantEnabled]);
 	const [teamList, setTeamList] = useState(sortONNs(normalizeTeam(ONNs)));
 	const [teamNextId, setTeamNextId] = useState(0);
 
@@ -6088,11 +6492,13 @@ const handleTeamSave = (newList, newNextId) => {
     const next = {
       lightMode: !!prefs?.lightMode,
       textSize: [0, 1, 2].includes(Number(prefs?.textSize)) ? Number(prefs.textSize) : 0,
-      deptName: (prefs?.deptName || "").trim() || "Oncology Nurse Navigator"
+      deptName: (prefs?.deptName || "").trim() || "Oncology Nurse Navigator",
+      assistantEnabled: prefs?.assistantEnabled !== false
     };
     setLightMode(next.lightMode);
     setTextSize(next.textSize);
     setDeptName(next.deptName);
+    setAssistantEnabled(next.assistantEnabled);
     saveSettings(next).catch(err => {
       if (err?.code === "auth") return;
       console.error("ONN Scheduler settings save error:", err);
@@ -6135,6 +6541,8 @@ const handleTeamSave = (newList, newNextId) => {
     weekStart: weekStart,
     deptName: deptName,
     setDeptName: setDeptName,
+    assistantEnabled: assistantEnabled,
+    setAssistantEnabled: setAssistantEnabled,
     nextId: teamNextId
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6153,6 +6561,10 @@ const handleTeamSave = (newList, newNextId) => {
         ::-webkit-scrollbar-track { background:transparent; }
         ::-webkit-scrollbar-thumb { background:${T.scrollThumb}; border-radius:3px; }
         textarea:focus, select:focus { outline:2px solid #6366f1 !important; }
+        @keyframes onnBuddyFloat {
+          0%, 100% { transform: translateY(0px) rotate(6deg); }
+          50% { transform: translateY(-6px) rotate(2deg); }
+        }
       `), /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.navBg,
@@ -6727,7 +7139,7 @@ const handleTeamSave = (newList, newNextId) => {
       fontWeight: 700,
       fontSize: "11px"
     }
-  }, c.icon, " ", c.fullLabel)))))));
+  }, c.icon, " ", c.fullLabel)))), assistantEnabled && !showSettings && !showPrint && /*#__PURE__*/React.createElement(ScheduleAssistant, null))));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Root));
 </script></body></html>

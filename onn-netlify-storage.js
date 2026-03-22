@@ -163,6 +163,7 @@
   function createAutoNetlifyBackend() {
     const local = createLocalStorageBackend(LOCAL_NAMESPACE);
     const etags = new Map();
+    const canFallbackToLocal = window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.endsWith(".local");
     let mode = window.location.protocol === "file:" ? "local" : "unknown";
 
     function setMode(nextMode) {
@@ -178,7 +179,7 @@
         });
 
         if (response.headers.get("x-onn-storage") !== "1") {
-          if (mode === "unknown") {
+          if (mode === "unknown" && canFallbackToLocal) {
             setMode("local");
             return null;
           }
@@ -201,12 +202,19 @@
 
         return response;
       } catch (error) {
-        if (mode === "unknown") {
+        if (mode === "unknown" && canFallbackToLocal) {
           setMode("local");
           return null;
         }
 
-        throw error;
+        if (error && error.code) {
+          throw error;
+        }
+
+        throw makeError(
+          "Shared storage is unavailable right now. Your changes cannot sync until the connection works again.",
+          "storage",
+        );
       }
     }
 
