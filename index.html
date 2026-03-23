@@ -372,7 +372,22 @@ function getActiveFloaterIds(dayData) {
   }
   return ids;
 }
+function getCoverageTargetIdSet(dayData, teamOnns = ONNs) {
+  const ids = new Set();
+  const activeFloaterIds = getActiveFloaterIds(dayData);
+  (teamOnns || []).forEach(onn => {
+    if (!onn) return;
+    const normalizedId = String(onn.id);
+    if (onn.floater) {
+      if (activeFloaterIds.has(Number(onn.id))) ids.add(normalizedId);
+      return;
+    }
+    if (!isAway(getSlot(dayData, onn.id).status)) ids.add(normalizedId);
+  });
+  return ids;
+}
 function buildIncomingCoverage(dayData, teamOnns) {
+  const availableCoverageIds = getCoverageTargetIdSet(dayData, teamOnns);
   const map = {}; // onnId -> [{ doctor, fromOnnName, duty }]
   teamOnns.forEach(absentOnn => {
     const slot = getSlot(dayData, absentOnn.id);
@@ -380,8 +395,10 @@ function buildIncomingCoverage(dayData, teamOnns) {
     const dc = slot.docCoverage || {};
     absentOnn.primary.forEach(doc => {
       const a = dc[doc] || {};
-      if (a.outlookOnnId) {
-        const tid = Number(a.outlookOnnId);
+      const outlookId = a.outlookOnnId != null ? String(a.outlookOnnId).trim() : "";
+      const epicId = a.epicOnnId != null ? String(a.epicOnnId).trim() : "";
+      if (outlookId && availableCoverageIds.has(outlookId)) {
+        const tid = Number(outlookId);
         if (!map[tid]) map[tid] = [];
         map[tid].push({
           doctor: doc,
@@ -389,8 +406,8 @@ function buildIncomingCoverage(dayData, teamOnns) {
           duty: "outlook"
         });
       }
-      if (a.epicOnnId) {
-        const tid = Number(a.epicOnnId);
+      if (epicId && availableCoverageIds.has(epicId)) {
+        const tid = Number(epicId);
         if (!map[tid]) map[tid] = [];
         map[tid].push({
           doctor: doc,
@@ -525,7 +542,9 @@ const StorageAdapter = (() => {
     async remove(key) {
       try {
         await backend.delete(key);
-      } catch {}
+      } catch (err) {
+        throw err;
+      }
     },
 
     async keys(prefix = "") {
@@ -581,7 +600,6 @@ const skey = (ws) => `onn_week5_${ws.toISOString().slice(0, 10)}`;
 const lkey = (ws) => `onn_week5_lock_${ws.toISOString().slice(0, 10)}`;
 const EDIT_LOCK_TTL_MS = 90 * 1000;
 const EDIT_LOCK_RENEW_MS = 30 * 1000;
-const RECENT_EDIT_WINDOW_MS = 10 * 60 * 1000;
 
 function getEditSessionId() {
   const fallback = `onn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -620,6 +638,13 @@ async function loadWeekLock(ws) {
 }
 
 async function releaseEditLock(ws, sessionId) {
+  const key = lkey(ws);
+  const current = await loadWeekLock(ws);
+  if (!current || typeof current !== "object") return true;
+  if (sessionId && current.sessionId && String(current.sessionId) !== String(sessionId)) {
+    return false;
+  }
+  await StorageAdapter.remove(key);
   return true;
 }
 
@@ -682,10 +707,89 @@ async function saveWeek(ws, data) {
 function slotHasCoverageAssignments(slot) {
   const dc = slot?.docCoverage || {};
   // Add parentheses for clarity (same logic, safer to read/maintain)
-return Object.values(dc).some(a =>
-  (a && a.outlookOnnId != null && a.outlookOnnId !== "") ||
-  (a && a.epicOnnId != null && a.epicOnnId !== "")
-);
+	return Object.values(dc).some(a =>
+	  (a && a.outlookOnnId != null && a.outlookOnnId !== "") ||
+	  (a && a.epicOnnId != null && a.epicOnnId !== "")
+	);
+}
+
+function resolveCoverageOnn(teamOnns, rawId) {
+  const normalizedId = rawId != null ? String(rawId).trim() : "";
+  if (!normalizedId) return null;
+  return (teamOnns || []).find(o => String(o.id) === normalizedId) || null;
+}
+
+function getDoctorCoverageState(slot, doctor, teamOnns = ONNs, availableCoverageIds = null) {
+  const assignment = (slot?.docCoverage || {})[doctor] || {};
+  const outlookId = assignment.outlookOnnId != null ? String(assignment.outlookOnnId).trim() : "";
+  const epicId = assignment.epicOnnId != null ? String(assignment.epicOnnId).trim() : "";
+  const outlookMatch = resolveCoverageOnn(teamOnns, outlookId);
+  const epicMatch = resolveCoverageOnn(teamOnns, epicId);
+  const outlookOnn = !outlookId || !availableCoverageIds || availableCoverageIds.has(outlookId) ? outlookMatch : null;
+  const epicOnn = !epicId || !availableCoverageIds || availableCoverageIds.has(epicId) ? epicMatch : null;
+  return {
+    outlookOnn,
+    epicOnn,
+    sameOnn: !!outlookOnn && !!epicOnn && outlookOnn.id === epicOnn.id,
+    fullyAssigned: !!outlookOnn && !!epicOnn,
+    hasAnyAssignment: !!outlookId || !!epicId,
+    hasInvalidAssignment: (!!outlookId && !outlookOnn) || (!!epicId && !epicOnn)
+  };
+}
+
+function sanitizeCoverageAssignmentId(rawId, availableCoverageIds, sourceOnnId) {
+  const normalizedId = rawId != null ? String(rawId).trim() : "";
+  if (!normalizedId) return "";
+  if (sourceOnnId != null && normalizedId === String(sourceOnnId)) return "";
+  if (availableCoverageIds && !availableCoverageIds.has(normalizedId)) return "";
+  return rawId;
+}
+
+function sanitizeDocCoverageForOnn(slot, onn, availableCoverageIds) {
+  if (!onn || onn.floater) return {};
+  const docCoverage = slot?.docCoverage && typeof slot.docCoverage === "object" ? slot.docCoverage : {};
+  const nextDocCoverage = {};
+  (onn.primary || []).forEach(doc => {
+    const assignment = docCoverage[doc];
+    if (!assignment || typeof assignment !== "object") return;
+    const outlookOnnId = sanitizeCoverageAssignmentId(assignment.outlookOnnId, availableCoverageIds, onn.id);
+    const epicOnnId = sanitizeCoverageAssignmentId(assignment.epicOnnId, availableCoverageIds, onn.id);
+    if (!outlookOnnId && !epicOnnId) return;
+    nextDocCoverage[doc] = {
+      outlookOnnId,
+      epicOnnId
+    };
+  });
+  return nextDocCoverage;
+}
+
+function syncWeekDataToTeam(data, teamOnns = ONNs) {
+  const source = data && typeof data === "object" ? data : {};
+  const next = {
+    ...source,
+    ...hydrateWeekData(source, teamOnns)
+  };
+  DAYS.forEach(day => {
+    const dayBase = next[day] || {
+      notes: "",
+      holiday: false,
+      staff: {}
+    };
+    const availableCoverageIds = getCoverageTargetIdSet(dayBase, teamOnns);
+    const staff = { ...(dayBase.staff || {}) };
+    teamOnns.forEach(onn => {
+      const slot = getSlot(dayBase, onn.id);
+      staff[onn.id] = onn.floater ? slot : {
+        ...slot,
+        docCoverage: sanitizeDocCoverageForOnn(slot, onn, availableCoverageIds)
+      };
+    });
+    next[day] = {
+      ...dayBase,
+      staff
+    };
+  });
+  return next;
 }
 
 function weekHasStrongSignals(weekData, teamOnns = ONNs) {
@@ -829,7 +933,7 @@ const hydrated = hydrateWeekData(baseWeek, teamOnns);
     ? hydrated
     : await applyVacationCarryover(ws, hydrated, teamOnns);
 
-  return { data: withCarry, existed: !!stored?._meta?.userSaved };
+  return { data: syncWeekDataToTeam(withCarry, teamOnns), existed: !!stored?._meta?.userSaved };
 }
 
 async function exportAllData(teamList) {
@@ -1266,7 +1370,7 @@ async function importOutlookCalendarCsvText(text, teamList) {
       let weekData = weeksToSave.get(weekKey);
       if (!weekData) {
         const loaded = await loadWeekWithCarryover(weekStart, teamList);
-        weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : hydrateWeekData(buildDefault(teamList), teamList);
+        weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : syncWeekDataToTeam(buildDefault(teamList), teamList);
         weeksToSave.set(weekKey, weekData);
       }
       const dayData = weekData[dayName] || {
@@ -1340,7 +1444,7 @@ async function importOutlookCalendarIcsText(text, teamList) {
       let weekData = weeksToSave.get(weekKey);
       if (!weekData) {
         const loaded = await loadWeekWithCarryover(weekStart, teamList);
-        weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : hydrateWeekData(buildDefault(teamList), teamList);
+        weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : syncWeekDataToTeam(buildDefault(teamList), teamList);
         weeksToSave.set(weekKey, weekData);
       }
       const dayData = weekData[dayName] || {
@@ -1428,8 +1532,10 @@ function sortONNs(list) {
 function normalizeTeam(list) {
   return (list || []).map(o => ({
     ...o,
+    id: Number.isFinite(Number(o?.id)) ? Number(o.id) : o?.id,
     orienting: !!o.orienting,
-    primary: Array.isArray(o.primary) ? o.primary : []
+    primary: Array.isArray(o.primary) ? o.primary : [],
+    defaults: o?.defaults && typeof o.defaults === "object" ? o.defaults : {}
   }));
 }
 
@@ -1688,7 +1794,7 @@ function OnnSelect({
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, placeholder), sortONNs(ONNs.filter(o => o.id !== excludeId)).map(o => /*#__PURE__*/React.createElement("option", {
+  }, placeholder), sortONNs(ONNs.filter(o => String(o.id) !== String(excludeId))).map(o => /*#__PURE__*/React.createElement("option", {
     key: o.id,
     value: o.id
   }, o.name, o.floater ? " (Float)" : "")));
@@ -1700,10 +1806,11 @@ function VacCoveragePanel({
   onSlotChange,
   forceOpen = false,
   onDone,
-  awayIds = new Set()
+  coverageTargetIds = new Set()
 }) {
   const [expanded, setExpanded] = useState(false);
-  const ONNs = useTeam().filter(o => !awayIds.has(o.id));
+  const teamOnns = useTeam();
+  const assignableOnns = teamOnns.filter(o => coverageTargetIds.has(String(o.id)) && String(o.id) !== String(onn.id));
   const lm = useTheme();
   const dc = slot.docCoverage || {};
   if (onn.primary.length === 0) return null;
@@ -1723,10 +1830,7 @@ function VacCoveragePanel({
       }
     });
   };
-  const allAssigned = onn.primary.every(doc => {
-    const a = dc[doc] || {};
-    return a.outlookOnnId && a.epicOnnId;
-  });
+  const allAssigned = onn.primary.every(doc => getDoctorCoverageState(slot, doc, teamOnns, coverageTargetIds).fullyAssigned);
   const prevAllAssignedRef = React.useRef(allAssigned);
   React.useEffect(() => {
     if (forceOpen) setExpanded(true);
@@ -1750,10 +1854,11 @@ function VacCoveragePanel({
         gap: "2px"
       }
     }, onn.primary.map(doc => {
-      const a = dc[doc] || {};
-      const emailOnn = ONNs.find(o => o.id === Number(a.outlookOnnId));
-      const epicOnn = ONNs.find(o => o.id === Number(a.epicOnnId));
-      const sameOnn = emailOnn && epicOnn && emailOnn.id === epicOnn.id;
+      const {
+        outlookOnn: emailOnn,
+        epicOnn,
+        sameOnn
+      } = getDoctorCoverageState(slot, doc, teamOnns, coverageTargetIds);
       if (sameOnn) {
         return /*#__PURE__*/React.createElement("div", {
           key: doc,
@@ -1876,7 +1981,7 @@ function VacCoveragePanel({
       value: a.outlookOnnId,
       onChange: v => setField(doc, "outlookOnnId", v),
       excludeId: onn.id,
-      ONNs: ONNs,
+      ONNs: assignableOnns,
       placeholder: "assign ONN"
     }), /*#__PURE__*/React.createElement("span", {
       style: {
@@ -1890,7 +1995,7 @@ function VacCoveragePanel({
       value: a.epicOnnId,
       onChange: v => setField(doc, "epicOnnId", v),
       excludeId: onn.id,
-      ONNs: ONNs,
+      ONNs: assignableOnns,
       placeholder: "assign ONN"
     })));
   }));
@@ -2111,7 +2216,7 @@ function VacationReturnBadge({
 
 // ─── STAFF ROW ───────────────────────────────────────────────────────────────
 
-function OnnTooltip({ onn, slot, incomingCoverage, ONNs, visible, x, y }) {
+function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = null, visible, x, y }) {
   if (!visible) return null;
   const c = STATUS_CONFIG[slot.status];
   const away = isAway(slot.status) && !onn.floater;
@@ -2183,14 +2288,15 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, visible, x, y }) {
     },
       /*#__PURE__*/React.createElement("div", {
         style: { fontSize: "9px", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "4px" }
-      }, "Coverage Assigned"),
-      onn.primary.map(doc => {
-        const a = dc[doc] || {};
-        const emailOnn = a.outlookOnnId ? ONNs.find(o => o.id === Number(a.outlookOnnId)) : null;
-        const epicOnn = a.epicOnnId ? ONNs.find(o => o.id === Number(a.epicOnnId)) : null;
-        const same = emailOnn && epicOnn && emailOnn.id === epicOnn.id;
-        const dutyLabel = same ? "Outlook & Epic" : emailOnn ? "Outlook" : epicOnn ? "Epic" : null;
-        const targetOnn = emailOnn || epicOnn;
+	      }, "Coverage Assigned"),
+	      onn.primary.map(doc => {
+	        const {
+	          outlookOnn: emailOnn,
+	          epicOnn,
+	          sameOnn: same
+	        } = getDoctorCoverageState(slot, doc, ONNs, coverageTargetIds);
+	        const dutyLabel = same ? "Outlook & Epic" : emailOnn ? "Outlook" : epicOnn ? "Epic" : null;
+	        const targetOnn = emailOnn || epicOnn;
         return /*#__PURE__*/React.createElement("div", {
           key: doc, style: { fontSize: "10px", color: "#374151", marginBottom: "2px", display: "flex", gap: "4px", alignItems: "baseline" }
         },
@@ -2240,7 +2346,7 @@ function CompactCoverageText({
   openSignal = 0,
   onEditVacation = () => {},
   rowDate = "",
-  awayIds = new Set()
+  coverageTargetIds = new Set()
 }) {
   const isVacation = slot.status === STATUS.VACATION;
   return /*#__PURE__*/React.createElement(React.Fragment, null,
@@ -2275,7 +2381,7 @@ function CompactCoverageText({
       slot: slot,
       editable: editable,
       onSlotChange: onSlotChange,
-      awayIds: awayIds
+      coverageTargetIds: coverageTargetIds
     })
   );
 }
@@ -2289,7 +2395,7 @@ function StaffRow({
   isSingle,
   density = 3,
   onNoteChange,
-  awayIds = new Set(),
+  coverageTargetIds = new Set(),
   dragCoverage = null,
   isDropTarget = false,
   onCoverageDragStart = () => {},
@@ -2326,7 +2432,7 @@ function StaffRow({
   const canBulkExpandAway = away && !onn.floater && (isSingle ? density >= 1 : density >= 2);
   const showWeekIncomingToggle = !isSingle && density >= 2 && !away && incomingCoverage && incomingCoverage.length > 0;
   const showDayIncomingToggle = isSingle && density >= 2 && !away && incomingCoverage && incomingCoverage.length > 0;
-  const canAcceptCoverageDrop = editable && !!dragCoverage && !away && dragCoverage.fromOnnId !== onn.id;
+  const canAcceptCoverageDrop = editable && !!dragCoverage && !away && String(dragCoverage.fromOnnId) !== String(onn.id);
   // dragEnterCount tracks net enter/leave events so child-element boundaries
   // don't falsely fire "leave" and flicker the drop zone away.
   const dragEnterCount = React.useRef(0);
@@ -2432,7 +2538,7 @@ function StaffRow({
   }));
   return /*#__PURE__*/React.createElement(React.Fragment, null,
   showTooltip && /*#__PURE__*/React.createElement(OnnTooltip, {
-    onn, slot, incomingCoverage, ONNs,
+    onn, slot, incomingCoverage, ONNs, coverageTargetIds,
     visible: tooltip.visible, x: tooltip.x, y: tooltip.y
   }),
   /*#__PURE__*/React.createElement("div", {
@@ -2645,8 +2751,7 @@ function StaffRow({
       gap: "4px"
     }
   }, onn.primary.map(doc => {
-    const a = (slot.docCoverage || {})[doc] || {};
-    const assigned = a.outlookOnnId != null && a.outlookOnnId !== "" && a.epicOnnId != null && a.epicOnnId !== "";
+    const assigned = getDoctorCoverageState(slot, doc, ONNs, coverageTargetIds).fullyAssigned;
     return /*#__PURE__*/React.createElement("span", {
     key: doc,
     draggable: true,
@@ -2756,7 +2861,7 @@ function StaffRow({
     openSignal: vacEditSignal,
     onEditVacation: () => setVacEditSignal(v => v + 1),
     rowDate: rowDate,
-    awayIds: awayIds
+    coverageTargetIds: coverageTargetIds
   }), density === 3 && away && !onn.floater && isSingle && showCollapsedCoverage && expanded && /*#__PURE__*/React.createElement(CompactCoverageText, {
     onn: onn,
     slot: slot,
@@ -2766,7 +2871,7 @@ function StaffRow({
     openSignal: vacEditSignal,
     onEditVacation: () => setVacEditSignal(v => v + 1),
     rowDate: rowDate,
-    awayIds: awayIds
+    coverageTargetIds: coverageTargetIds
   }), density < 3 && density >= 1 && away && !onn.floater && isSingle && expanded && /*#__PURE__*/React.createElement(React.Fragment, null, editable && slot.status === STATUS.VACATION && /*#__PURE__*/React.createElement("button", {
     onClick: e => {
       e.stopPropagation();
@@ -2796,7 +2901,7 @@ function StaffRow({
     slot: slot,
     editable: editable,
     onSlotChange: onSlotChange,
-    awayIds: awayIds
+    coverageTargetIds: coverageTargetIds
   })), showWeekAwayToggle && expanded && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: "4px",
@@ -2837,7 +2942,7 @@ function StaffRow({
     onSlotChange: onSlotChange,
     forceOpen: showWeekAssignmentTools,
 onDone: () => setExpanded(false),
-    awayIds: awayIds
+    coverageTargetIds: coverageTargetIds
   })), isSingle && density >= 2 && !away && incomingExpanded && /*#__PURE__*/React.createElement(IncomingCoverageBadges, {
     items: incomingCoverage
   }), !isSingle && density >= 2 && !away && incomingExpanded && /*#__PURE__*/React.createElement(IncomingCoverageBadges, {
@@ -3316,7 +3421,7 @@ function DayCard({
       alignContent: "start"
     }
 }, (() => {
-    const awayIds = new Set(ONNs.filter(o => isAway(getSlot(dayData, o.id).status)).map(o => o.id));
+    const coverageTargetIds = getCoverageTargetIdSet(dayData, ONNs);
     return combinedVisibleRows.map((onn, i) => /*#__PURE__*/React.createElement(StaffRow, {
       key: onn.id,
       onn: onn,
@@ -3349,7 +3454,7 @@ function DayCard({
 		  note
 		}),
 		onRemoveFloater: removeFloaterFromDay,
-		awayIds: awayIds
+		coverageTargetIds: coverageTargetIds
 	  }));
 	  })(), isSingle && !singleDaySingleColumn && (() => {
     const totalRows = combinedVisibleRows.length;
@@ -3719,6 +3824,7 @@ onClick: () => {
     const dayActiveFloaterIds = getActiveFloaterIds(weekData[day] || {
       staff: {}
     });
+    const coverageTargetIds = getCoverageTargetIdSet(weekData[day], ONNs);
     const floaterActiveToday = !onn.floater || dayActiveFloaterIds.has(onn.id);
     const imap = buildIncomingCoverage(weekData[day], ONNs);
     const incoming = imap[onn.id] || [];
@@ -3747,10 +3853,11 @@ onClick: () => {
         marginTop: "2px"
       }
     }, "Note: ", slot.note), !onn.floater && isAway(slot.status) && onn.primary.map(doc => {
-      const a = (slot.docCoverage || {})[doc] || {};
-      const emailOnn = a.outlookOnnId ? ONNs.find(o => o.id === Number(a.outlookOnnId)) : null;
-      const epicOnn = a.epicOnnId ? ONNs.find(o => o.id === Number(a.epicOnnId)) : null;
-      const same = emailOnn && epicOnn && emailOnn.id === epicOnn.id;
+      const {
+        outlookOnn: emailOnn,
+        epicOnn,
+        sameOnn: same
+      } = getDoctorCoverageState(slot, doc, ONNs, coverageTargetIds);
       return /*#__PURE__*/React.createElement("div", {
         key: doc,
         style: {
@@ -3973,6 +4080,7 @@ onClick: () => {
   }, "Coverage / Note"))), /*#__PURE__*/React.createElement("tbody", null, printableDayOnns.map((onn, i) => {
     const slot = getSlot(dayData, onn.id);
     const incoming = incomingMap[onn.id] || [];
+    const coverageTargetIds = getCoverageTargetIdSet(dayData, ONNs);
     return /*#__PURE__*/React.createElement("tr", {
       key: onn.id,
       style: {
@@ -4035,10 +4143,11 @@ onClick: () => {
         marginBottom: "3px"
       }
     }, "Note: ", slot.note), !onn.floater && isAway(slot.status) && onn.primary.map(doc => {
-      const a = (slot.docCoverage || {})[doc] || {};
-      const emailOnn = a.outlookOnnId ? ONNs.find(o => o.id === Number(a.outlookOnnId)) : null;
-      const epicOnn = a.epicOnnId ? ONNs.find(o => o.id === Number(a.epicOnnId)) : null;
-      const same = emailOnn && epicOnn && emailOnn.id === epicOnn.id;
+      const {
+        outlookOnn: emailOnn,
+        epicOnn,
+        sameOnn: same
+      } = getDoctorCoverageState(slot, doc, ONNs, coverageTargetIds);
       return /*#__PURE__*/React.createElement("div", {
         key: doc,
         style: {
@@ -5216,8 +5325,13 @@ function SettingsModal({
     }
   };
   const handleReset = async () => {
-    await factoryReset();
-    window.location.reload();
+    try {
+      await factoryReset();
+      window.location.reload();
+    } catch (err) {
+      alert("Factory reset could not clear shared storage right now.");
+      console.error("ONN Scheduler factory reset error:", err);
+    }
   };
   const handleLogoutClick = async () => {
     if (typeof onLogout !== "function") return;
@@ -5975,7 +6089,6 @@ function App({
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [weekActivity, setWeekActivity] = React.useState({
-    lock: null,
     savedAt: ""
   });
   const editSessionIdRef = React.useRef(getEditSessionId());
@@ -5987,9 +6100,8 @@ function App({
   const weekStart = getWeekStart(weekOffset);
   const weekDates = getWeekDates(weekStart);
   const refreshWeekActivity = React.useCallback(async () => {
-    const [lock, rawWeek] = await Promise.all([loadWeekLock(weekStart), loadWeek(weekStart)]);
+    const rawWeek = await loadWeek(weekStart);
     setWeekActivity({
-      lock: lock && typeof lock === "object" ? lock : null,
       savedAt: rawWeek?._meta?.savedAt || ""
     });
   }, [weekStart]);
@@ -6112,11 +6224,11 @@ function App({
     }) => {
       if (cancelled) return;
       if (data) {
-        setWeekData(data);
+        setWeekData(syncWeekDataToTeam(data, teamList));
         isDirty.current = false;
         setHasUnsaved(false);
       } else {
-        const generated = buildDefault(teamList);
+        const generated = syncWeekDataToTeam(buildDefault(teamList), teamList);
         setWeekData(generated);
         isDirty.current = false;
         setHasUnsaved(false);
@@ -6137,10 +6249,9 @@ function App({
     if (!teamLoaded) return;
     let cancelled = false;
     const update = async () => {
-      const [lock, rawWeek] = await Promise.all([loadWeekLock(weekStart), loadWeek(weekStart)]);
+      const rawWeek = await loadWeek(weekStart);
       if (cancelled) return;
       setWeekActivity({
-        lock: lock && typeof lock === "object" ? lock : null,
         savedAt: rawWeek?._meta?.savedAt || ""
       });
     };
@@ -6241,7 +6352,9 @@ function App({
     setSaveError(null);
     try {
       await tryAcquireEditLock(weekStart, editSessionIdRef.current);
-      await saveWeek(weekStart, weekData);
+      const nextWeekData = syncWeekDataToTeam(weekData, teamList);
+      setWeekData(nextWeekData);
+      await saveWeek(weekStart, nextWeekData);
       await releaseEditLock(weekStart, editSessionIdRef.current);
       await refreshWeekActivity();
       isDirty.current = false;
@@ -6361,7 +6474,7 @@ function App({
           });
         }
       }
-      return next;
+      return syncWeekDataToTeam(next, teamList);
     });
   };
   const updateNotes = (day, val) => {
@@ -6443,19 +6556,7 @@ function App({
     remote: "WFH shifts"
   };
   const displayed = activeDay ? [activeDay] : DAYS;
-  const activeWeekLock = weekActivity.lock && isEditLockActive(weekActivity.lock) ? weekActivity.lock : null;
-  const recentWeekVisitAt = activeWeekLock?.lastSeenAt || activeWeekLock?.acquiredAt || "";
-  const hasRecentWeekVisit = !!recentWeekVisitAt && Date.now() - Date.parse(recentWeekVisitAt) < RECENT_EDIT_WINDOW_MS;
-  const recentlyEdited = !!weekActivity.savedAt && Date.now() - Date.parse(weekActivity.savedAt) < RECENT_EDIT_WINDOW_MS;
-  const savedAtTs = Date.parse(weekActivity.savedAt || "");
-  const visitedAtTs = Date.parse(recentWeekVisitAt || "");
-  const activityBanner = !editMode && recentlyEdited && (!hasRecentWeekVisit || !Number.isFinite(visitedAtTs) || savedAtTs >= visitedAtTs) ? {
-    tone: "info",
-    text: `This week was saved ${formatRelativeTime(weekActivity.savedAt)}.`
-  } : !editMode && hasRecentWeekVisit ? {
-    tone: "info",
-    text: `This week was opened ${formatRelativeTime(recentWeekVisitAt)}.`
-  } : null;
+  const onlineSavedNote = StorageAdapter.backendName !== "localStorage" && weekActivity.savedAt ? `Last online save ${formatRelativeTime(weekActivity.savedAt)}.` : "";
 const handleTeamSave = (newList, newNextId) => {
   const sorted = sortONNs(normalizeTeam(newList));
   setTeamList(sorted);
@@ -6470,23 +6571,7 @@ const handleTeamSave = (newList, newNextId) => {
       console.error("ONN Scheduler next ID save error:", err);
     });
   }
-  setWeekData(prev => {
-      const next = {};
-      DAYS.forEach(day => {
-        const staff = {};
-        sorted.forEach(o => {
-          staff[o.id] = prev[day]?.staff?.[o.id] || {
-            ...buildInitialSlot(o),
-            status: getDefaultStatusForDay(o, day)
-          };
-        });
-        next[day] = {
-          ...prev[day],
-          staff
-        };
-      });
-      return next;
-    });
+  setWeekData(prev => syncWeekDataToTeam(prev, sorted));
   };
   const handlePreferencesSave = prefs => {
     const next = {
@@ -6508,7 +6593,7 @@ const handleTeamSave = (newList, newNextId) => {
     if (!result || !Array.isArray(result.updatedWeeks)) return;
     if (!result.updatedWeeks.includes(skey(weekStart))) return;
     const refreshed = await loadWeekWithCarryover(weekStart, teamList);
-    setWeekData(refreshed?.data || hydrateWeekData(buildDefault(teamList), teamList));
+    setWeekData(refreshed?.data || syncWeekDataToTeam(buildDefault(teamList), teamList));
     setEditMode(false);
     setSaved(false);
     setHasUnsaved(false);
@@ -6664,7 +6749,14 @@ const handleTeamSave = (newList, newNextId) => {
       color: lightMode ? "#64748b" : "#94a3b8",
       fontSize: textSize === 2 ? "13px" : textSize === 1 ? "11px" : "10px"
     }
-  }, weekDates[0].getFullYear(), " ", showJump ? "▲" : "▼")), /*#__PURE__*/React.createElement("button", {
+  }, weekDates[0].getFullYear(), " ", showJump ? "▲" : "▼"), onlineSavedNote && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: lightMode ? "#64748b" : "#94a3b8",
+      fontSize: textSize === 2 ? "11px" : "9px",
+      marginTop: "2px",
+      lineHeight: 1.3
+    }
+  }, onlineSavedNote)), /*#__PURE__*/React.createElement("button", {
     onClick: () => navigateWeek(w => w + 1),
     style: NAV_BTN(lightMode)
   }, "›"), /*#__PURE__*/React.createElement("button", {
@@ -6794,7 +6886,7 @@ const handleTeamSave = (newList, newNextId) => {
       setShowClearConfirm(false);
       loadWeekWithCarryover(weekStart, teamList).then(({
         data
-      }) => setWeekData(data || hydrateWeekData(buildDefault(teamList), teamList))).catch(err => {
+      }) => setWeekData(data || syncWeekDataToTeam(buildDefault(teamList), teamList))).catch(err => {
         if (err?.code !== "auth") {
           console.error("ONN Scheduler week reload error:", err);
         }
@@ -7022,24 +7114,7 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       ...NBTN(lightMode)
     }
-  }, rowExpandValue ? "Hide details" : "Show details")))), activityBanner && /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: `0 ${pagePad} 12px`,
-      maxWidth: "1700px",
-      margin: "0 auto"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: "11px 14px",
-      borderRadius: "14px",
-      border: activityBanner.tone === "warn" ? "1px solid rgba(217,119,6,0.28)" : `1px solid ${lightMode ? "rgba(59,130,246,0.18)" : "rgba(148,163,184,0.18)"}`,
-      background: activityBanner.tone === "warn" ? lightMode ? "#fff7ed" : "rgba(180,83,9,0.18)" : lightMode ? "#eff6ff" : "rgba(30,41,59,0.9)",
-      color: activityBanner.tone === "warn" ? lightMode ? "#9a3412" : "#fdba74" : lightMode ? "#1d4ed8" : "#bfdbfe",
-      fontSize: "12px",
-      fontWeight: 700,
-      lineHeight: 1.5
-    }
-  }, activityBanner.text)), /*#__PURE__*/React.createElement("div", {
+  }, rowExpandValue ? "Hide details" : "Show details")))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: `0 ${pagePad}`,
       maxWidth: "1700px",
