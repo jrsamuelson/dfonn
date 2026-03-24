@@ -156,8 +156,6 @@ const STATUS_CONFIG = {
 };
 const isAway = s => STATUS_CONFIG[s]?.away === true;
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-const COVERAGE_OVERLOAD_DOCTOR_THRESHOLD = 4;
-const LOCAL_DRAFT_PREFIX = "onn_scheduler:localdraft_v1:";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -597,46 +595,6 @@ async function loadSettings() {
 async function saveSettings(s) {
   await StorageAdapter.set(SETTINGS_KEY, s);
 }
-function localDraftKey(ws) {
-  return `${LOCAL_DRAFT_PREFIX}${ws.toISOString().slice(0, 10)}`;
-}
-function loadLocalDraft(ws) {
-  try {
-    if (!(ws instanceof Date) || Number.isNaN(ws.getTime())) return null;
-    const raw = localStorage.getItem(localDraftKey(ws));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || !parsed.data || typeof parsed.data !== "object") return null;
-    return {
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
-      data: parsed.data
-    };
-  } catch {
-    return null;
-  }
-}
-function saveLocalDraft(ws, data) {
-  try {
-    if (!(ws instanceof Date) || Number.isNaN(ws.getTime()) || !data || typeof data !== "object") return "";
-    const updatedAt = new Date().toISOString();
-    localStorage.setItem(localDraftKey(ws), JSON.stringify({
-      updatedAt,
-      data
-    }));
-    return updatedAt;
-  } catch (err) {
-    console.error("ONN Scheduler local draft save error:", err);
-    return "";
-  }
-}
-function clearLocalDraft(ws) {
-  try {
-    if (!(ws instanceof Date) || Number.isNaN(ws.getTime())) return;
-    localStorage.removeItem(localDraftKey(ws));
-  } catch (err) {
-    console.error("ONN Scheduler local draft clear error:", err);
-  }
-}
 
 const skey = (ws) => `onn_week5_${ws.toISOString().slice(0, 10)}`;
 const lkey = (ws) => `onn_week5_lock_${ws.toISOString().slice(0, 10)}`;
@@ -777,256 +735,6 @@ function getDoctorCoverageState(slot, doctor, teamOnns = ONNs, availableCoverage
     hasAnyAssignment: !!outlookId || !!epicId,
     hasInvalidAssignment: (!!outlookId && !outlookOnn) || (!!epicId && !epicOnn)
   };
-}
-
-function getCoverageAssignmentRecords(dayData, teamOnns = ONNs, availableCoverageIds = null) {
-  const activeCoverageIds = availableCoverageIds || getCoverageTargetIdSet(dayData, teamOnns);
-  const records = [];
-  (teamOnns || []).forEach(sourceOnn => {
-    if (!sourceOnn || sourceOnn.floater) return;
-    const sourceSlot = getSlot(dayData, sourceOnn.id);
-    if (!isAway(sourceSlot.status)) return;
-    const docCoverage = sourceSlot.docCoverage || {};
-    (sourceOnn.primary || []).forEach(doctor => {
-      const assignment = docCoverage[doctor] || {};
-      [{
-        duty: "outlook",
-        rawId: assignment.outlookOnnId
-      }, {
-        duty: "epic",
-        rawId: assignment.epicOnnId
-      }].forEach(({
-        duty,
-        rawId
-      }) => {
-        const targetId = rawId != null ? String(rawId).trim() : "";
-        const targetOnn = resolveCoverageOnn(teamOnns, targetId);
-        const targetSlot = targetOnn ? getSlot(dayData, targetOnn.id) : null;
-        const isActiveTarget = !!targetId && activeCoverageIds.has(targetId);
-        let invalidReason = "";
-        if (targetId) {
-          if (!targetOnn) invalidReason = "missing_target";
-          else if (String(targetOnn.id) === String(sourceOnn.id)) invalidReason = "self_assignment";
-          else if (!isActiveTarget && targetOnn.floater && !targetSlot?.floaterActive) invalidReason = "inactive_floater";
-          else if (!isActiveTarget && isAway(targetSlot?.status)) invalidReason = "away_target";
-          else if (!isActiveTarget) invalidReason = "inactive_target";
-        }
-        records.push({
-          sourceOnnId: sourceOnn.id,
-          sourceOnnName: sourceOnn.name,
-          sourceStatus: sourceSlot.status,
-          doctor,
-          duty,
-          targetId,
-          targetOnn,
-          targetSlot,
-          isAssigned: !!targetId,
-          isValid: !!targetId && !!targetOnn && !invalidReason,
-          invalidReason
-        });
-      });
-    });
-  });
-  return records;
-}
-
-function buildCoverageLoadByOnn(records, teamOnns = ONNs) {
-  const loadByOnn = {};
-  (teamOnns || []).forEach(onn => {
-    if (!onn) return;
-    loadByOnn[String(onn.id)] = {
-      onnId: onn.id,
-      name: onn.name,
-      floater: !!onn.floater,
-      dutyCount: 0,
-      doctorCount: 0,
-      doctors: new Set(),
-      sourceNames: new Set()
-    };
-  });
-  (records || []).forEach(record => {
-    if (!record || !record.isValid || !record.targetId) return;
-    const entry = loadByOnn[String(record.targetId)];
-    if (!entry) return;
-    entry.dutyCount += 1;
-    entry.doctors.add(`${record.sourceOnnId}|${record.doctor}`);
-    entry.sourceNames.add(record.sourceOnnName);
-  });
-  Object.values(loadByOnn).forEach(entry => {
-    entry.doctorCount = entry.doctors.size;
-    entry.doctors = Array.from(entry.doctors);
-    entry.sourceNames = Array.from(entry.sourceNames);
-  });
-  return loadByOnn;
-}
-
-function describeCoverageInvalidReason(record) {
-  if (!record || !record.isAssigned) return "";
-  const dutyLabel = record.duty === "outlook" ? "Outlook" : "Epic";
-  const targetName = record.targetOnn?.name || "that saved ONN";
-  if (record.invalidReason === "missing_target") {
-    return `${dutyLabel} coverage points to a person who is no longer on the team.`;
-  }
-  if (record.invalidReason === "self_assignment") {
-    return `${dutyLabel} coverage still points back to the absent ONN.`;
-  }
-  if (record.invalidReason === "inactive_floater") {
-    return `${targetName} is a floater, but they are not active on this day.`;
-  }
-  if (record.invalidReason === "away_target") {
-    return `${targetName} is away on this day, so that ${dutyLabel} coverage does not count.`;
-  }
-  if (record.invalidReason === "inactive_target") {
-    return `${targetName} is not active for coverage on this day.`;
-  }
-  return `${targetName} is not available to cover this ${dutyLabel} assignment.`;
-}
-
-function getCoverageDiagnostics(dayData, teamOnns = ONNs) {
-  const availableCoverageIds = getCoverageTargetIdSet(dayData, teamOnns);
-  const assignmentRecords = getCoverageAssignmentRecords(dayData, teamOnns, availableCoverageIds);
-  const coverageLoadByOnn = buildCoverageLoadByOnn(assignmentRecords, teamOnns);
-  const issues = [];
-  const rowIssuesByOnn = {};
-  const pushIssue = issue => {
-    if (!issue || issue.onnId == null) return;
-    const key = String(issue.onnId);
-    if (!rowIssuesByOnn[key]) rowIssuesByOnn[key] = [];
-    rowIssuesByOnn[key].push(issue);
-    issues.push(issue);
-  };
-  const docGroups = {};
-  assignmentRecords.forEach(record => {
-    const key = `${record.sourceOnnId}|${record.doctor}`;
-    if (!docGroups[key]) {
-      docGroups[key] = {
-        sourceOnnId: record.sourceOnnId,
-        sourceOnnName: record.sourceOnnName,
-        doctor: record.doctor,
-        duties: {}
-      };
-    }
-    docGroups[key].duties[record.duty] = record;
-  });
-  Object.values(docGroups).forEach(group => {
-    const outlook = group.duties.outlook || {
-      duty: "outlook",
-      isAssigned: false,
-      isValid: false
-    };
-    const epic = group.duties.epic || {
-      duty: "epic",
-      isAssigned: false,
-      isValid: false
-    };
-    const assignedCount = [outlook, epic].filter(record => record.isAssigned).length;
-    const validCount = [outlook, epic].filter(record => record.isValid).length;
-    const invalidAssigned = [outlook, epic].filter(record => record.isAssigned && !record.isValid);
-    if (assignedCount === 0) {
-      pushIssue({
-        onnId: group.sourceOnnId,
-        kind: "missing",
-        severity: "high",
-        doctor: group.doctor,
-        label: `${group.doctor} missing coverage`,
-        detail: `${group.doctor} does not have Outlook or Epic coverage assigned yet.`
-      });
-      return;
-    }
-    invalidAssigned.forEach(record => {
-      const dutyLabel = record.duty === "outlook" ? "Outlook" : "Epic";
-      pushIssue({
-        onnId: group.sourceOnnId,
-        kind: record.invalidReason === "inactive_floater" ? "inactive_floater" : "invalid_assignment",
-        severity: "high",
-        doctor: group.doctor,
-        duty: record.duty,
-        targetOnnId: record.targetOnn?.id || null,
-        label: `${group.doctor} ${dutyLabel} needs reassignment`,
-        detail: describeCoverageInvalidReason(record)
-      });
-    });
-    if (invalidAssigned.length === 0 && validCount === 1) {
-      const missingDuty = outlook.isValid ? "Epic" : "Outlook";
-      pushIssue({
-        onnId: group.sourceOnnId,
-        kind: "partial",
-        severity: "warn",
-        doctor: group.doctor,
-        label: `${group.doctor} missing ${missingDuty}`,
-        detail: `${group.doctor} only has ${outlook.isValid ? "Outlook" : "Epic"} coverage assigned right now.`
-      });
-    }
-  });
-  Object.values(coverageLoadByOnn).forEach(entry => {
-    if (!entry || entry.doctorCount <= COVERAGE_OVERLOAD_DOCTOR_THRESHOLD) return;
-    pushIssue({
-      onnId: entry.onnId,
-      kind: "overload",
-      severity: "warn",
-      targetOnnId: entry.onnId,
-      label: `Covering ${entry.doctorCount} doctors`,
-      detail: `${entry.name} is already covering ${entry.doctorCount} doctors today.`
-    });
-  });
-  const criticalCount = issues.filter(issue => issue.severity === "high").length;
-  const warningCount = issues.length - criticalCount;
-  return {
-    issues,
-    rowIssuesByOnn,
-    coverageLoadByOnn,
-    availableCoverageIds,
-    criticalCount,
-    warningCount
-  };
-}
-
-function getBestCoverageSuggestion(sourceOnn, doctor, dayData, teamOnns = ONNs, coverageLoadByOnn = null, availableCoverageIds = null, preferredIds = []) {
-  if (!sourceOnn || !doctor) return null;
-  const activeCoverageIds = availableCoverageIds || getCoverageTargetIdSet(dayData, teamOnns);
-  const loadByOnn = coverageLoadByOnn || buildCoverageLoadByOnn(getCoverageAssignmentRecords(dayData, teamOnns, activeCoverageIds), teamOnns);
-  const preferredIdSet = new Set((preferredIds || []).map(id => String(id).trim()).filter(Boolean));
-  const ranked = (teamOnns || []).filter(onn => {
-    if (!onn) return false;
-    const normalizedId = String(onn.id);
-    return normalizedId !== String(sourceOnn.id) && activeCoverageIds.has(normalizedId);
-  }).map(onn => {
-    const load = loadByOnn[String(onn.id)] || {
-      doctorCount: 0,
-      dutyCount: 0
-    };
-    return {
-      onn,
-      doctorCount: load.doctorCount || 0,
-      dutyCount: load.dutyCount || 0,
-      preferredRank: preferredIdSet.has(String(onn.id)) ? 0 : 1,
-      floaterRank: onn.floater ? 0 : 1
-    };
-  }).sort((a, b) => a.preferredRank - b.preferredRank || a.doctorCount - b.doctorCount || a.dutyCount - b.dutyCount || a.floaterRank - b.floaterRank || a.onn.name.localeCompare(b.onn.name));
-  if (ranked.length === 0) return null;
-  const best = ranked[0];
-  return {
-    onn: best.onn,
-    doctor,
-    doctorCount: best.doctorCount,
-    dutyCount: best.dutyCount,
-    coverageLabel: best.doctorCount === 0 ? "covering nobody else yet" : `covering ${best.doctorCount} doctor${best.doctorCount === 1 ? "" : "s"}`
-  };
-}
-
-function buildCoverageSuggestionsForOnn(sourceOnn, slot, dayData, teamOnns = ONNs, coverageLoadByOnn = null, availableCoverageIds = null) {
-  if (!sourceOnn || sourceOnn.floater) return {};
-  const activeCoverageIds = availableCoverageIds || getCoverageTargetIdSet(dayData, teamOnns);
-  const suggestions = {};
-  (sourceOnn.primary || []).forEach(doctor => {
-    const coverageState = getDoctorCoverageState(slot, doctor, teamOnns, activeCoverageIds);
-    const preferredIds = [];
-    if (coverageState.outlookOnn) preferredIds.push(coverageState.outlookOnn.id);
-    if (coverageState.epicOnn) preferredIds.push(coverageState.epicOnn.id);
-    const suggestion = getBestCoverageSuggestion(sourceOnn, doctor, dayData, teamOnns, coverageLoadByOnn, activeCoverageIds, preferredIds);
-    if (suggestion) suggestions[doctor] = suggestion;
-  });
-  return suggestions;
 }
 
 function sanitizeCoverageAssignmentId(rawId, availableCoverageIds, sourceOnnId) {
@@ -2098,18 +1806,13 @@ function VacCoveragePanel({
   onSlotChange,
   forceOpen = false,
   onDone,
-  coverageTargetIds = new Set(),
-  dayData = {
-    staff: {}
-  },
-  coverageLoadByOnn = {}
+  coverageTargetIds = new Set()
 }) {
   const [expanded, setExpanded] = useState(false);
   const teamOnns = useTeam();
   const assignableOnns = teamOnns.filter(o => coverageTargetIds.has(String(o.id)) && String(o.id) !== String(onn.id));
   const lm = useTheme();
   const dc = slot.docCoverage || {};
-  const suggestionMap = buildCoverageSuggestionsForOnn(onn, slot, dayData, teamOnns, coverageLoadByOnn, coverageTargetIds);
   if (onn.primary.length === 0) return null;
   const setField = (doc, field, value) => {
     const prev = dc[doc] || {
@@ -2125,61 +1828,6 @@ function VacCoveragePanel({
           [field]: value
         }
       }
-    });
-  };
-  const applySuggestedDoctor = doc => {
-    const suggestion = suggestionMap[doc];
-    if (!suggestion) return;
-    const coverageState = getDoctorCoverageState(slot, doc, teamOnns, coverageTargetIds);
-    const prev = dc[doc] || {
-      outlookOnnId: "",
-      epicOnnId: ""
-    };
-    const nextAssign = {
-      ...prev
-    };
-    if (!coverageState.outlookOnn) nextAssign.outlookOnnId = suggestion.onn.id;
-    if (!coverageState.epicOnn) nextAssign.epicOnnId = suggestion.onn.id;
-    onSlotChange({
-      ...slot,
-      docCoverage: {
-        ...dc,
-        [doc]: nextAssign
-      }
-    });
-  };
-  const hasActionableSuggestion = onn.primary.some(doc => {
-    const suggestion = suggestionMap[doc];
-    if (!suggestion) return false;
-    const coverageState = getDoctorCoverageState(slot, doc, teamOnns, coverageTargetIds);
-    return !coverageState.fullyAssigned || coverageState.hasInvalidAssignment;
-  });
-  const applyAllSuggestions = () => {
-    const nextDocCoverage = {
-      ...dc
-    };
-    let changed = false;
-    onn.primary.forEach(doc => {
-      const suggestion = suggestionMap[doc];
-      if (!suggestion) return;
-      const coverageState = getDoctorCoverageState(slot, doc, teamOnns, coverageTargetIds);
-      if (coverageState.fullyAssigned && !coverageState.hasInvalidAssignment) return;
-      const prev = nextDocCoverage[doc] || {
-        outlookOnnId: "",
-        epicOnnId: ""
-      };
-      const nextAssign = {
-        ...prev
-      };
-      if (!coverageState.outlookOnn) nextAssign.outlookOnnId = suggestion.onn.id;
-      if (!coverageState.epicOnn) nextAssign.epicOnnId = suggestion.onn.id;
-      nextDocCoverage[doc] = nextAssign;
-      changed = true;
-    });
-    if (!changed) return;
-    onSlotChange({
-      ...slot,
-      docCoverage: nextDocCoverage
     });
   };
   const allAssigned = onn.primary.every(doc => getDoctorCoverageState(slot, doc, teamOnns, coverageTargetIds).fullyAssigned);
@@ -2295,47 +1943,11 @@ function VacCoveragePanel({
     style: {
       marginTop: "4px"
     }
-  }, editable && hasActionableSuggestion && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: "8px",
-      padding: "8px 9px",
-      borderRadius: "8px",
-      background: "#eff6ff",
-      border: "1px solid #bfdbfe",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: "8px",
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: "0.72em",
-      lineHeight: 1.45,
-      color: "#1d4ed8",
-      fontWeight: 600
-    }
-  }, "Best-fit suggestions use active ONNs and floaters with the lightest current coverage load."), /*#__PURE__*/React.createElement("button", {
-    onClick: applyAllSuggestions,
-    style: {
-      border: "none",
-      borderRadius: "7px",
-      background: "#1d4ed8",
-      color: "#fff",
-      padding: "6px 10px",
-      fontFamily: "inherit",
-      fontSize: "0.74em",
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, "Suggest all")), onn.primary.map(doc => {
+  }, onn.primary.map(doc => {
     const a = dc[doc] || {
       outlookOnnId: "",
       epicOnnId: ""
     };
-    const coverageState = getDoctorCoverageState(slot, doc, teamOnns, coverageTargetIds);
-    const suggestion = suggestionMap[doc];
-    const showSuggestion = editable && suggestion && (!coverageState.fullyAssigned || coverageState.hasInvalidAssignment);
     return /*#__PURE__*/React.createElement("div", {
       key: doc,
       style: {
@@ -2385,43 +1997,7 @@ function VacCoveragePanel({
       excludeId: onn.id,
       ONNs: assignableOnns,
       placeholder: "assign ONN"
-    })), showSuggestion && /*#__PURE__*/React.createElement("div", {
-      style: {
-        marginTop: "4px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "8px",
-        flexWrap: "wrap",
-        padding: "6px 7px",
-        borderRadius: "7px",
-        background: "#f8fafc",
-        border: "1px dashed #cbd5e1"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: "0.72em",
-        lineHeight: 1.45,
-        color: "#475569"
-      }
-    }, "Best fit: ", /*#__PURE__*/React.createElement("strong", {
-      style: {
-        color: "#0f172a"
-      }
-    }, suggestion.onn.name), " — ", suggestion.coverageLabel), /*#__PURE__*/React.createElement("button", {
-      onClick: () => applySuggestedDoctor(doc),
-      style: {
-        border: "none",
-        borderRadius: "6px",
-        background: "#e0e7ff",
-        color: "#4338ca",
-        padding: "5px 9px",
-        fontFamily: "inherit",
-        fontSize: "0.72em",
-        fontWeight: 700,
-        cursor: "pointer"
-      }
-    }, "Use best fit")));
+    })));
   }));
 }
 function IncomingCoverageBadges({
@@ -2477,64 +2053,6 @@ function IncomingCoverageBadges({
       fontWeight: 500
     }
   }, g.fromOnnName))));
-}
-function CoverageIssuePills({
-  issues,
-  compact = false
-}) {
-  if (!issues || issues.length === 0) return null;
-  const visibleIssues = issues.slice(0, compact ? 2 : 3);
-  return /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: "5px",
-      display: "flex",
-      flexWrap: "wrap",
-      gap: "5px"
-    }
-  }, visibleIssues.map((issue, index) => {
-    const tone = issue.severity === "high" ? {
-      bg: "#fee2e2",
-      border: "#fecaca",
-      color: "#b91c1c",
-      icon: "⚠"
-    } : {
-      bg: "#fef3c7",
-      border: "#fcd34d",
-      color: "#92400e",
-      icon: "!"
-    };
-    return /*#__PURE__*/React.createElement("span", {
-      key: `${issue.kind}_${issue.doctor || issue.label}_${index}`,
-      title: issue.detail || issue.label,
-      style: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: compact ? "2px 7px" : "3px 8px",
-        borderRadius: "999px",
-        border: `1px solid ${tone.border}`,
-        background: tone.bg,
-        color: tone.color,
-        fontSize: compact ? "0.68em" : "0.72em",
-        fontWeight: 700,
-        lineHeight: 1.2,
-        maxWidth: "100%"
-      }
-    }, /*#__PURE__*/React.createElement("span", null, tone.icon), /*#__PURE__*/React.createElement("span", {
-      style: {
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis"
-      }
-    }, issue.label));
-  }), issues.length > visibleIssues.length && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: compact ? "0.68em" : "0.72em",
-      color: "#64748b",
-      fontWeight: 700,
-      alignSelf: "center"
-    }
-  }, "+", issues.length - visibleIssues.length, " more"));
 }
 
 // ─── VACATION RETURN DATE ────────────────────────────────────────────────────
@@ -2828,11 +2346,7 @@ function CompactCoverageText({
   openSignal = 0,
   onEditVacation = () => {},
   rowDate = "",
-  coverageTargetIds = new Set(),
-  dayData = {
-    staff: {}
-  },
-  coverageLoadByOnn = {}
+  coverageTargetIds = new Set()
 }) {
   const isVacation = slot.status === STATUS.VACATION;
   return /*#__PURE__*/React.createElement(React.Fragment, null,
@@ -2867,9 +2381,7 @@ function CompactCoverageText({
       slot: slot,
       editable: editable,
       onSlotChange: onSlotChange,
-      coverageTargetIds: coverageTargetIds,
-      dayData: dayData,
-      coverageLoadByOnn: coverageLoadByOnn
+      coverageTargetIds: coverageTargetIds
     })
   );
 }
@@ -2880,12 +2392,9 @@ function StaffRow({
   onSlotChange,
   zebra,
   incomingCoverage,
-  dayData,
   isSingle,
   density = 3,
   onNoteChange,
-  coverageIssues = [],
-  coverageLoadByOnn = {},
   coverageTargetIds = new Set(),
   dragCoverage = null,
   isDropTarget = false,
@@ -3318,10 +2827,7 @@ function StaffRow({
         cursor: "pointer"
       }
     }, label);
-  })), coverageIssues.length > 0 && /*#__PURE__*/React.createElement(CoverageIssuePills, {
-    issues: coverageIssues,
-    compact: density < 3
-  }), density >= 3 && editable && /*#__PURE__*/React.createElement("input", {
+  })), density >= 3 && editable && /*#__PURE__*/React.createElement("input", {
     value: slot.note || "",
     onChange: e => onNoteChange(e.target.value),
     placeholder: "Add a note...",
@@ -3355,9 +2861,7 @@ function StaffRow({
     openSignal: vacEditSignal,
     onEditVacation: () => setVacEditSignal(v => v + 1),
     rowDate: rowDate,
-    coverageTargetIds: coverageTargetIds,
-    dayData: dayData,
-    coverageLoadByOnn: coverageLoadByOnn
+    coverageTargetIds: coverageTargetIds
   }), density === 3 && away && !onn.floater && isSingle && showCollapsedCoverage && expanded && /*#__PURE__*/React.createElement(CompactCoverageText, {
     onn: onn,
     slot: slot,
@@ -3367,9 +2871,7 @@ function StaffRow({
     openSignal: vacEditSignal,
     onEditVacation: () => setVacEditSignal(v => v + 1),
     rowDate: rowDate,
-    coverageTargetIds: coverageTargetIds,
-    dayData: dayData,
-    coverageLoadByOnn: coverageLoadByOnn
+    coverageTargetIds: coverageTargetIds
   }), density < 3 && density >= 1 && away && !onn.floater && isSingle && expanded && /*#__PURE__*/React.createElement(React.Fragment, null, editable && slot.status === STATUS.VACATION && /*#__PURE__*/React.createElement("button", {
     onClick: e => {
       e.stopPropagation();
@@ -3399,9 +2901,7 @@ function StaffRow({
     slot: slot,
     editable: editable,
     onSlotChange: onSlotChange,
-    coverageTargetIds: coverageTargetIds,
-    dayData: dayData,
-    coverageLoadByOnn: coverageLoadByOnn
+    coverageTargetIds: coverageTargetIds
   })), showWeekAwayToggle && expanded && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: "4px",
@@ -3442,9 +2942,7 @@ function StaffRow({
     onSlotChange: onSlotChange,
     forceOpen: showWeekAssignmentTools,
 onDone: () => setExpanded(false),
-    coverageTargetIds: coverageTargetIds,
-    dayData: dayData,
-    coverageLoadByOnn: coverageLoadByOnn
+    coverageTargetIds: coverageTargetIds
   })), isSingle && density >= 2 && !away && incomingExpanded && /*#__PURE__*/React.createElement(IncomingCoverageBadges, {
     items: incomingCoverage
   }), !isSingle && density >= 2 && !away && incomingExpanded && /*#__PURE__*/React.createElement(IncomingCoverageBadges, {
@@ -3688,21 +3186,13 @@ function DayCard({
   const vac = rSlots.filter(s => isAway(s.status)).length; // regulars only
   const working = regularsForStats.length - vac + activeFloatersForStats.length; // floaters always count as working
   const incomingMap = buildIncomingCoverage(dayData, ONNs);
-  const coverageDiagnostics = getCoverageDiagnostics(dayData, ONNs);
-  const coverageTargetIds = coverageDiagnostics.availableCoverageIds;
   const visibleRegulars = regulars.filter(onn => {
     if (!statusFilter || editable) return true;
     const slot = getSlot(dayData, onn.id);
     if (statusFilter === 'away') return isAway(slot.status);
     return slot.status === statusFilter;
   });
-  const visibleFloaters = activeFloaters.filter(onn => {
-    if (!statusFilter || editable) return true;
-    if (statusFilter === 'away') return false;
-    const floaterStatus = getSlot(dayData, onn.id).floaterLoc || STATUS.CH;
-    return floaterStatus === statusFilter;
-  });
-  const combinedVisibleRows = [...visibleRegulars, ...visibleFloaters];
+  const combinedVisibleRows = [...visibleRegulars, ...activeFloaters];
 
   // ── FIX: In edit mode the staff list must NOT flex-grow to fill a fixed card
   // height. Instead, let it size to content so FloaterPicker pushes the card
@@ -3917,24 +3407,7 @@ function DayCard({
       letterSpacing: "0.08em",
       textTransform: "uppercase"
     }
-  }, "Status")), !dayData.holiday && coverageDiagnostics.issues.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: density >= 2 ? "7px 12px" : "6px 8px",
-      borderBottom: "1px solid #fed7aa",
-      background: "#fff7ed"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: "0.68em",
-      fontWeight: 800,
-      color: "#9a3412",
-      letterSpacing: "0.08em",
-      textTransform: "uppercase"
-    }
-  }, coverageDiagnostics.criticalCount > 0 ? `${coverageDiagnostics.issues.length} coverage checks needed` : `${coverageDiagnostics.warningCount} coverage warning${coverageDiagnostics.warningCount === 1 ? "" : "s"}`), /*#__PURE__*/React.createElement(CoverageIssuePills, {
-    issues: coverageDiagnostics.issues,
-    compact: density < 3 && !isSingle
-  })), /*#__PURE__*/React.createElement("div", {
+  }, "Status")), /*#__PURE__*/React.createElement("div", {
     style: {
       // ── THE FIX ──
       // flex:1 in view mode so stats/notes pin to the bottom of equal-height cards.
@@ -3947,19 +3420,18 @@ function DayCard({
       gridTemplateColumns: isSingle ? singleDaySingleColumn ? "1fr" : "1fr 1fr" : undefined,
       alignContent: "start"
     }
-}, combinedVisibleRows.map((onn, i) => /*#__PURE__*/React.createElement(StaffRow, {
+}, (() => {
+    const coverageTargetIds = getCoverageTargetIdSet(dayData, ONNs);
+    return combinedVisibleRows.map((onn, i) => /*#__PURE__*/React.createElement(StaffRow, {
       key: onn.id,
       onn: onn,
       slot: getSlot(dayData, onn.id),
       editable: editable,
       zebra: isSingle ? singleDaySingleColumn ? i % 2 !== 0 : Math.floor(i / 2) % 2 !== 0 : i % 2 !== 0,
-    dayData: dayData,
     isSingle: isSingle,
     density: isSingle && onn.floater ? 3 : density,
     incomingCoverage: incomingMap[onn.id] || [],
     onSlotChange: slot => onSlotChange(onn.id, slot),
-    coverageIssues: coverageDiagnostics.rowIssuesByOnn[String(onn.id)] || [],
-    coverageLoadByOnn: coverageDiagnostics.coverageLoadByOnn,
     dragCoverage: dragCoverage,
     isDropTarget: dropTargetOnnId === onn.id,
     onCoverageDragStart: payload => {
@@ -3983,7 +3455,8 @@ function DayCard({
 		}),
 		onRemoveFloater: removeFloaterFromDay,
 		coverageTargetIds: coverageTargetIds
-	  })), isSingle && !singleDaySingleColumn && (() => {
+	  }));
+	  })(), isSingle && !singleDaySingleColumn && (() => {
     const totalRows = combinedVisibleRows.length;
     if (totalRows % 2 === 0) return null;
     const zebra = Math.floor(totalRows / 2) % 2 !== 0;
@@ -4821,269 +4294,6 @@ onClick: () => {
     }
   }, /*#__PURE__*/React.createElement("strong", null, "Day Notes:"), " ", weekData[selectedDay].notes))))));
 }
-function MorningHuddleView({
-  weekData,
-  weekDates,
-  activeDay,
-  onClose,
-  deptName = "Oncology Nurse Navigator"
-}) {
-  const ONNs = useTeam();
-  const viewportWidth = useViewportWidth();
-  const isPhone = viewportWidth <= 640;
-  const today = new Date();
-  const weekdayIndex = today.getDay();
-  const defaultDay = activeDay || (weekdayIndex >= 1 && weekdayIndex <= 5 ? DAYS[weekdayIndex - 1] : "Monday");
-  const [selectedDay, setSelectedDay] = React.useState(defaultDay);
-  const dayIndex = DAYS.indexOf(selectedDay);
-  const dayDate = weekDates[dayIndex >= 0 ? dayIndex : 0];
-  const dayData = weekData[selectedDay] || {
-    notes: "",
-    staff: {}
-  };
-  const incomingMap = buildIncomingCoverage(dayData, ONNs);
-  const coverageTargetIds = getCoverageTargetIdSet(dayData, ONNs);
-  const activeFloaterIds = getActiveFloaterIds(dayData);
-  const visibleOnns = ONNs.filter(onn => !onn.floater || activeFloaterIds.has(onn.id));
-  const columnTemplate = isPhone ? "1fr" : "minmax(180px,2fr) minmax(120px,0.8fr) minmax(260px,2fr) minmax(180px,1.3fr)";
-  const header = /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: isPhone ? "flex-start" : "center",
-      gap: "12px",
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: isPhone ? "11px" : "12px",
-      fontWeight: 800,
-      letterSpacing: "0.12em",
-      textTransform: "uppercase",
-      color: "#bfdbfe"
-    }
-  }, "Morning Huddle"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: isPhone ? "24px" : "34px",
-      fontWeight: 800,
-      color: "#f8fafc",
-      letterSpacing: "-0.03em",
-      marginTop: "4px"
-    }
-  }, selectedDay, " ", fmt(dayDate)), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: isPhone ? "12px" : "14px",
-      color: "#cbd5e1",
-      marginTop: "4px"
-    }
-  }, deptName)), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: "8px",
-      alignItems: "center",
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("select", {
-    value: selectedDay,
-    onChange: e => setSelectedDay(e.target.value),
-    style: {
-      padding: "10px 14px",
-      borderRadius: "12px",
-      border: "1px solid rgba(191,219,254,0.35)",
-      background: "rgba(255,255,255,0.96)",
-      color: "#0f172a",
-      fontFamily: "inherit",
-      fontSize: "13px",
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, DAYS.map(day => /*#__PURE__*/React.createElement("option", {
-    key: day,
-    value: day
-  }, day))), /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    style: {
-      border: "1px solid rgba(255,255,255,0.18)",
-      background: "rgba(255,255,255,0.08)",
-      color: "#f8fafc",
-      borderRadius: "12px",
-      padding: "10px 14px",
-      fontFamily: "inherit",
-      fontSize: "13px",
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, "Close")));
-  const notesPanel = dayData.notes ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: isPhone ? "12px 14px" : "14px 18px",
-      borderRadius: "18px",
-      background: "rgba(255,255,255,0.96)",
-      color: "#78350f",
-      border: "1px solid #fcd34d",
-      fontSize: isPhone ? "13px" : "15px",
-      lineHeight: 1.5,
-      boxShadow: "0 16px 36px rgba(15,23,42,0.18)"
-    }
-  }, /*#__PURE__*/React.createElement("strong", null, "Day Notes:"), " ", dayData.notes) : null;
-  const rowNodes = visibleOnns.map((onn, index) => {
-    const slot = getSlot(dayData, onn.id);
-    const incomingCoverage = incomingMap[onn.id] || [];
-    const away = !onn.floater && isAway(slot.status);
-    const coverageNodes = away && (onn.primary || []).length > 0 ? (onn.primary || []).map(doc => {
-      const coverageState = getDoctorCoverageState(slot, doc, ONNs, coverageTargetIds);
-      const targetLabel = coverageState.sameOnn ? `Outlook & Epic to ${coverageState.outlookOnn.name}` : [coverageState.outlookOnn ? `Outlook to ${coverageState.outlookOnn.name}` : "", coverageState.epicOnn ? `Epic to ${coverageState.epicOnn.name}` : ""].filter(Boolean).join(" · ");
-      return /*#__PURE__*/React.createElement("div", {
-        key: doc,
-        style: {
-          fontSize: isPhone ? "12px" : "13px",
-          lineHeight: 1.45,
-          color: "#334155"
-        }
-      }, /*#__PURE__*/React.createElement("strong", {
-        style: {
-          color: "#dc2626"
-        }
-      }, doc), " ", targetLabel ? /*#__PURE__*/React.createElement("span", null, targetLabel) : /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#b91c1c",
-          fontWeight: 700
-        }
-      }, "Needs coverage"));
-    }) : incomingCoverage.length > 0 ? incomingCoverage.map((item, idx) => /*#__PURE__*/React.createElement("div", {
-      key: `${item.doctor}_${idx}`,
-      style: {
-        fontSize: isPhone ? "12px" : "13px",
-        lineHeight: 1.45,
-        color: "#334155"
-      }
-    }, /*#__PURE__*/React.createElement("strong", {
-      style: {
-        color: "#dc2626"
-      }
-    }, item.doctor), " ", item.duty === "outlook" ? "Outlook" : item.duty === "epic" ? "Epic" : item.duty, " from ", item.fromOnnName)) : [/*#__PURE__*/React.createElement("div", {
-      key: "empty",
-      style: {
-        fontSize: isPhone ? "12px" : "13px",
-        color: "#64748b",
-        lineHeight: 1.45
-      }
-    }, away ? "No coverage assigned yet." : "No additional coverage details.")];
-    return /*#__PURE__*/React.createElement("div", {
-      key: onn.id,
-      style: {
-        display: "grid",
-        gridTemplateColumns: columnTemplate,
-        gap: isPhone ? "8px" : "12px",
-        padding: isPhone ? "14px" : "16px 18px",
-        background: index % 2 === 0 ? "#ffffff" : "#f8fafc",
-        alignItems: "start"
-      }
-    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: isPhone ? "16px" : "18px",
-        fontWeight: 800,
-        color: "#0f172a",
-        lineHeight: 1.2
-      }
-    }, onn.name, onn.floater && /*#__PURE__*/React.createElement("span", {
-      style: {
-        marginLeft: "8px",
-        fontSize: "10px",
-        fontWeight: 800,
-        color: "#0369a1",
-        background: "#e0f2fe",
-        padding: "2px 7px",
-        borderRadius: "999px",
-        verticalAlign: "middle"
-      }
-    }, "FLOAT")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        marginTop: "4px",
-        fontSize: isPhone ? "12px" : "13px",
-        color: "#475569",
-        lineHeight: 1.4
-      }
-    }, onn.floater ? "Available for coverage" : (onn.primary || []).length > 0 ? onn.primary.join(" · ") : "No primary doctors")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        alignSelf: "start"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "6px",
-        padding: "6px 12px",
-        borderRadius: "999px",
-        background: onn.floater ? STATUS_CONFIG[slot.floaterLoc || STATUS.CH].bg : STATUS_CONFIG[slot.status].bg,
-        color: onn.floater ? STATUS_CONFIG[slot.floaterLoc || STATUS.CH].color : STATUS_CONFIG[slot.status].color,
-        fontWeight: 800,
-        fontSize: isPhone ? "12px" : "13px"
-      }
-    }, onn.floater ? STATUS_CONFIG[slot.floaterLoc || STATUS.CH].icon : STATUS_CONFIG[slot.status].icon, " ", printStatusLabelForSlot(slot, onn))), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px"
-      }
-    }, coverageNodes), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: isPhone ? "12px" : "13px",
-        lineHeight: 1.5,
-        color: slot.note ? "#334155" : "#94a3b8",
-        fontStyle: slot.note ? "normal" : "italic"
-      }
-    }, slot.note || "No note"));
-  });
-  const tableHeader = !isPhone ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: columnTemplate,
-      gap: "12px",
-      padding: "12px 18px",
-      background: "#e0f2fe",
-      borderBottom: "1px solid #bae6fd",
-      fontSize: "11px",
-      fontWeight: 800,
-      letterSpacing: "0.08em",
-      textTransform: "uppercase",
-      color: "#0f172a"
-    }
-  }, /*#__PURE__*/React.createElement("div", null, "ONN"), /*#__PURE__*/React.createElement("div", null, "Status"), /*#__PURE__*/React.createElement("div", null, "Doctor Coverage"), /*#__PURE__*/React.createElement("div", null, "Note")) : null;
-  const tablePanel = /*#__PURE__*/React.createElement("div", {
-    style: {
-      borderRadius: "24px",
-      overflow: "hidden",
-      background: "rgba(255,255,255,0.98)",
-      boxShadow: "0 28px 60px rgba(15,23,42,0.22)"
-    }
-  }, tableHeader, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gap: "1px",
-      background: "#e2e8f0"
-    }
-  }, rowNodes));
-  return /*#__PURE__*/React.createElement("div", {
-    style: {
-      position: "fixed",
-      inset: 0,
-      zIndex: 220,
-      background: "linear-gradient(160deg, rgba(15,23,42,0.9), rgba(30,41,59,0.92))",
-      padding: isPhone ? "14px" : "24px",
-      overflow: "auto"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      maxWidth: "1480px",
-      margin: "0 auto",
-      minHeight: "100%",
-      display: "flex",
-      flexDirection: "column",
-      gap: isPhone ? "14px" : "18px"
-    }
-  }, header, notesPanel, tablePanel));
-}
 function MonthBtn({
   label,
   isCur,
@@ -5111,78 +4321,7 @@ function MonthBtn({
     }
   }, label);
 }
-function buildAssistantContext({
-  weekData,
-  teamList,
-  activeDay,
-  editMode,
-  hasUnsaved
-}) {
-  const prompts = [];
-  const scanDays = activeDay ? [activeDay] : DAYS;
-  for (const day of scanDays) {
-    const dayData = weekData?.[day] || {
-      staff: {}
-    };
-    const diagnostics = getCoverageDiagnostics(dayData, teamList);
-    const awayWithCoverageGap = (teamList || []).find(onn => {
-      if (!onn || onn.floater) return false;
-      if (!isAway(getSlot(dayData, onn.id).status)) return false;
-      return (diagnostics.rowIssuesByOnn[String(onn.id)] || []).some(issue => issue.kind !== "overload");
-    });
-    if (awayWithCoverageGap) {
-      const slot = getSlot(dayData, awayWithCoverageGap.id);
-      prompts.push({
-        key: `coverage_${day}_${awayWithCoverageGap.id}`,
-        shortLabel: `Cover ${awayWithCoverageGap.name}`,
-        title: `${awayWithCoverageGap.name} is ${slot.status === STATUS.VACATION ? "on vacation" : "off"}${activeDay ? "" : ` on ${day}`}.`,
-        body: `Want me to walk you through assigning Outlook and Epic coverage for ${awayWithCoverageGap.name}'s doctors?`,
-        actionLabel: "Show coverage guide",
-        topic: "coverage"
-      });
-      break;
-    }
-    if (diagnostics.issues.length > 0) {
-      prompts.push({
-        key: `warning_${day}`,
-        shortLabel: `Fix ${diagnostics.issues.length} warning${diagnostics.issues.length === 1 ? "" : "s"}`,
-        title: `${day} has ${diagnostics.issues.length} coverage warning${diagnostics.issues.length === 1 ? "" : "s"}.`,
-        body: diagnostics.issues[0]?.detail || "I can walk you through the flagged coverage issues.",
-        actionLabel: "Review coverage guide",
-        topic: "coverage"
-      });
-      break;
-    }
-  }
-  if (hasUnsaved) {
-    prompts.push({
-      key: "autosave",
-      shortLabel: "Save changes",
-      title: "Your edits are being backed up locally on this browser.",
-      body: "Refresh recovery is on, but Save Edits is still what syncs everyone online.",
-      actionLabel: "Show edit guide",
-      topic: "edit"
-    });
-  } else if (!editMode) {
-    prompts.push({
-      key: "edit",
-      shortLabel: "Edit schedule",
-      title: "Need to make a change?",
-      body: "Open Edit Schedule, then click a status badge to cycle CH, LW, WFH, Off, or Vacation.",
-      actionLabel: "Show edit guide",
-      topic: "edit"
-    });
-  }
-  return {
-    launcherLabel: prompts[0]?.shortLabel || "Need help?",
-    prompts: prompts.slice(0, 2)
-  };
-}
-function ScheduleAssistant({
-  onDismiss = () => {},
-  contextPrompts = [],
-  launcherLabel = "Need help?"
-}) {
+function ScheduleAssistant() {
   const lightMode = useTheme();
   const viewportWidth = useViewportWidth();
   const isPhone = viewportWidth <= 640;
@@ -5221,15 +4360,9 @@ function ScheduleAssistant({
     steps: ["Open Settings, then Preferences.", "Choose Import Outlook file.", "Upload the Outlook export with titles like Alex LW or Nooni Vacation.", "Review the import feedback before closing Settings."]
   }];
   const activeTopic = helperTopics.find(topic => topic.key === activeGuide) || helperTopics[0];
-  const hasContextPrompts = contextPrompts.length > 0;
   const closeHelper = () => {
     setExpanded(false);
     setActiveGuide("overview");
-  };
-  const dismissAssistant = event => {
-    if (event && typeof event.stopPropagation === "function") event.stopPropagation();
-    closeHelper();
-    onDismiss();
   };
   const eyeShell = extra => ({
     position: "absolute",
@@ -5249,68 +4382,6 @@ function ScheduleAssistant({
     background: "#111827",
     ...extra
   });
-  const contextPromptNodes = hasContextPrompts ? contextPrompts.map(prompt => /*#__PURE__*/React.createElement("div", {
-    key: prompt.key || prompt.title,
-    style: {
-      padding: "10px 12px",
-      borderRadius: "14px",
-      background: lightMode ? "#eef2ff" : "rgba(99,102,241,0.18)",
-      border: lightMode ? "1px solid rgba(99,102,241,0.16)" : "1px solid rgba(165,180,252,0.18)"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: "12px",
-      fontWeight: 700,
-      color: bubbleText
-    }
-  }, prompt.title), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: "4px",
-      fontSize: "11px",
-      lineHeight: 1.45,
-      color: bubbleSub
-    }
-  }, prompt.body), prompt.topic && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setActiveGuide(prompt.topic),
-    style: {
-      marginTop: "8px",
-      padding: "6px 10px",
-      borderRadius: "9px",
-      border: "none",
-      background: lightMode ? "#ffffff" : "rgba(15,23,42,0.55)",
-      color: lightMode ? "#4338ca" : "#c7d2fe",
-      fontFamily: "inherit",
-      fontSize: "11px",
-      fontWeight: 700,
-      cursor: "pointer"
-    }
-  }, prompt.actionLabel || "Show guide"))) : null;
-  const guideTopicNodes = helperTopics.map(topic => /*#__PURE__*/React.createElement("button", {
-    key: topic.key,
-    onClick: () => setActiveGuide(topic.key),
-    style: {
-      textAlign: "left",
-      padding: "10px 12px",
-      borderRadius: "12px",
-      border: lightMode ? "1px solid rgba(99,102,241,0.14)" : "1px solid rgba(148,163,184,0.18)",
-      background: lightMode ? "#fafaff" : "rgba(30,41,59,0.72)",
-      color: bubbleText,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: "12px",
-      fontWeight: 700,
-      marginBottom: "3px"
-    }
-  }, topic.icon, " ", topic.title), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: "11px",
-      lineHeight: 1.45,
-      color: bubbleSub
-    }
-  }, topic.summary)));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
@@ -5379,14 +4450,14 @@ function ScheduleAssistant({
       lineHeight: 1.45,
       fontWeight: 700
     }
-  }, activeGuide === "overview" ? hasContextPrompts ? "I spotted a good next step." : "What do you want to change?" : activeTopic.title), /*#__PURE__*/React.createElement("div", {
+  }, activeGuide === "overview" ? "What do you want to change?" : activeTopic.title), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: "8px",
       fontSize: "12px",
       lineHeight: 1.45,
       color: bubbleSub
     }
-  }, activeGuide === "overview" ? hasContextPrompts ? "Pick one of these prompts, or jump into any guide below." : "Pick a guide below and I will walk you through the clicks." : activeTopic.summary)), /*#__PURE__*/React.createElement("button", {
+  }, activeGuide === "overview" ? "Pick a guide below and I will walk you through the clicks." : activeTopic.summary)), /*#__PURE__*/React.createElement("button", {
     onClick: closeHelper,
     title: "Dismiss helper",
     style: {
@@ -5408,7 +4479,32 @@ function ScheduleAssistant({
       display: "grid",
       gap: "8px"
     }
-  }, contextPromptNodes, guideTopicNodes, /*#__PURE__*/React.createElement("div", {
+  }, helperTopics.map(topic => /*#__PURE__*/React.createElement("button", {
+    key: topic.key,
+    onClick: () => setActiveGuide(topic.key),
+    style: {
+      textAlign: "left",
+      padding: "10px 12px",
+      borderRadius: "12px",
+      border: lightMode ? "1px solid rgba(99,102,241,0.14)" : "1px solid rgba(148,163,184,0.18)",
+      background: lightMode ? "#fafaff" : "rgba(30,41,59,0.72)",
+      color: bubbleText,
+      cursor: "pointer",
+      fontFamily: "inherit"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "12px",
+      fontWeight: 700,
+      marginBottom: "3px"
+    }
+  }, topic.icon, " ", topic.title), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "11px",
+      lineHeight: 1.45,
+      color: bubbleSub
+    }
+  }, topic.summary))), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: "12px",
       fontSize: "11px",
@@ -5499,28 +4595,6 @@ function ScheduleAssistant({
       cursor: "pointer"
     }
   }, "Close")))), /*#__PURE__*/React.createElement("button", {
-    onClick: dismissAssistant,
-    title: "Hide assistant",
-    "aria-label": "Hide schedule sidekick",
-    style: {
-      position: "absolute",
-      right: isPhone ? "2px" : "4px",
-      top: isPhone ? "18px" : "20px",
-      width: "22px",
-      height: "22px",
-      borderRadius: "999px",
-      border: "none",
-      background: lightMode ? "rgba(255,255,255,0.96)" : "rgba(15,23,42,0.96)",
-      color: lightMode ? "#64748b" : "#cbd5e1",
-      fontSize: "13px",
-      fontWeight: 800,
-      lineHeight: 1,
-      cursor: "pointer",
-      pointerEvents: "auto",
-      boxShadow: lightMode ? "0 8px 18px rgba(79,70,229,0.14)" : "0 8px 18px rgba(2,6,23,0.45)",
-      zIndex: 9
-    }
-  }, "×"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (expanded) {
         closeHelper();
@@ -5561,7 +4635,7 @@ function ScheduleAssistant({
       whiteSpace: "nowrap",
       zIndex: 8
     }
-  }, launcherLabel), /*#__PURE__*/React.createElement("div", {
+  }, "Need help?"), /*#__PURE__*/React.createElement("div", {
     style: {
       position: "absolute",
       inset: 0,
@@ -7152,7 +6226,6 @@ function App({
   const [statusFilter, setStatusFilter] = useState(null);
   const [focusedDay, setFocusedDay] = useState(null);
   const [showPrint, setShowPrint] = useState(false);
-  const [showHuddle, setShowHuddle] = useState(false);
   const [showJump, setShowJump] = useState(false);
   const [lightMode, setLightMode] = useState(true);
   const [textSize, setTextSize] = useState(0);
@@ -7163,7 +6236,6 @@ function App({
   const [assistantEnabled, setAssistantEnabled] = useState(true);
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [draftRecovery, setDraftRecovery] = useState(null);
   const [weekActivity, setWeekActivity] = React.useState({
     savedAt: ""
   });
@@ -7182,13 +6254,8 @@ function App({
     });
   }, [weekStart]);
   const confirmDiscardUnsaved = () => window.confirm("You have unsaved schedule edits for this week. Discard them and continue?");
-  const clearCurrentLocalDraft = () => {
-    clearLocalDraft(weekStart);
-    setDraftRecovery(null);
-  };
   const navigateWeek = next => {
     if (editMode && hasUnsaved && !confirmDiscardUnsaved()) return;
-    if (editMode && hasUnsaved) clearCurrentLocalDraft();
     if (editMode) {
       void releaseEditLock(weekStart, editSessionIdRef.current);
     }
@@ -7314,8 +6381,6 @@ function App({
         isDirty.current = false;
         setHasUnsaved(false);
       }
-      const localDraft = loadLocalDraft(weekStart);
-      if (!cancelled) setDraftRecovery(localDraft);
       if (!cancelled) setLoading(false);
     }).catch(err => {
       if (cancelled) return;
@@ -7383,20 +6448,6 @@ function App({
     };
   }, [editMode, weekStart, refreshWeekActivity]);
   useEffect(() => {
-    if (!teamLoaded || loading || !editMode || !hasUnsaved) return;
-    const timer = window.setTimeout(() => {
-      const nextDraft = syncWeekDataToTeam(weekData, teamList);
-      const updatedAt = saveLocalDraft(weekStart, nextDraft);
-      if (updatedAt) {
-        setDraftRecovery({
-          updatedAt,
-          data: nextDraft
-        });
-      }
-    }, 700);
-    return () => window.clearTimeout(timer);
-  }, [teamLoaded, loading, editMode, hasUnsaved, weekData, teamList, weekStart]);
-  useEffect(() => {
     const warnOnUnload = e => {
       if (!editMode || !hasUnsaved) return;
       e.preventDefault();
@@ -7452,7 +6503,6 @@ function App({
       const nextWeekData = syncWeekDataToTeam(weekData, teamList);
       setWeekData(nextWeekData);
       await saveWeek(weekStart, nextWeekData);
-      clearCurrentLocalDraft();
       await releaseEditLock(weekStart, editSessionIdRef.current);
       await refreshWeekActivity();
       isDirty.current = false;
@@ -7696,26 +6746,7 @@ const handleTeamSave = (newList, newNextId) => {
     setSaved(false);
     setHasUnsaved(false);
     isDirty.current = false;
-    setDraftRecovery(loadLocalDraft(weekStart));
   };
-  const handleRestoreDraft = async () => {
-    const localDraft = draftRecovery?.data ? draftRecovery : loadLocalDraft(weekStart);
-    if (!localDraft?.data) return;
-    await beginEditMode();
-    const restored = syncWeekDataToTeam(localDraft.data, teamList);
-    setWeekData(restored);
-    setDraftRecovery(localDraft);
-    setHasUnsaved(true);
-    setSaved(false);
-    isDirty.current = true;
-  };
-  const assistantContext = buildAssistantContext({
-    weekData,
-    teamList,
-    activeDay,
-    editMode,
-    hasUnsaved
-  });
   return /*#__PURE__*/React.createElement(ThemeCtx.Provider, {
     value: lightMode
   }, /*#__PURE__*/React.createElement(TeamCtx.Provider, {
@@ -7725,12 +6756,6 @@ const handleTeamSave = (newList, newNextId) => {
     weekDates: weekDates,
     onClose: () => setShowPrint(false),
     activeDay: activeDay
-  }), showHuddle && /*#__PURE__*/React.createElement(MorningHuddleView, {
-    weekData: weekData,
-    weekDates: weekDates,
-    activeDay: activeDay,
-    deptName: deptName,
-    onClose: () => setShowHuddle(false)
   }), showSettings && /*#__PURE__*/React.createElement(SettingsModal, {
     onns: teamList,
     onSave: handleTeamSave,
@@ -7972,26 +6997,12 @@ const handleTeamSave = (newList, newNextId) => {
     },
     style: NBTN(lightMode)
   }, "Settings"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowHuddle(true),
-    style: NBTN(lightMode)
-  }, "Huddle"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (editMode && hasUnsaved && !confirmDiscardUnsaved()) return;
       setShowPrint(true);
     },
     style: NBTN(lightMode)
-  }, "Print"), editMode ? /*#__PURE__*/React.createElement(React.Fragment, null, hasUnsaved && draftRecovery?.updatedAt && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: "11px",
-      fontWeight: 700,
-      color: lightMode ? "#0f766e" : "#6ee7b7",
-      background: lightMode ? "#ecfdf5" : "rgba(16,185,129,0.14)",
-      border: `1px solid ${lightMode ? "#a7f3d0" : "rgba(110,231,183,0.28)"}`,
-      borderRadius: "6px",
-      padding: "3px 8px",
-      lineHeight: 1.3
-    }
-  }, "Local draft saved ", formatRelativeTime(draftRecovery.updatedAt)), saveError && /*#__PURE__*/React.createElement("span", {
+  }, "Print"), editMode ? /*#__PURE__*/React.createElement(React.Fragment, null, saveError && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: "11px",
       fontWeight: 700,
@@ -8007,7 +7018,6 @@ const handleTeamSave = (newList, newNextId) => {
   }, saveError), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (hasUnsaved && !confirmDiscardUnsaved()) return;
-      if (hasUnsaved) clearCurrentLocalDraft();
       void releaseEditLock(weekStart, editSessionIdRef.current).then(() => refreshWeekActivity()).catch(err => {
         if (err?.code !== "auth") {
           console.error("ONN Scheduler edit lock release error:", err);
@@ -8251,43 +7261,7 @@ const handleTeamSave = (newList, newNextId) => {
       maxWidth: "1700px",
       margin: "0 auto"
     }
-  }, draftRecovery?.updatedAt && !editMode && !hasUnsaved && !loading && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: "12px",
-      padding: isPhone ? "12px 14px" : "12px 16px",
-      borderRadius: "14px",
-      background: lightMode ? "#eff6ff" : "rgba(30,64,175,0.18)",
-      border: `1px solid ${lightMode ? "#bfdbfe" : "rgba(147,197,253,0.22)"}`,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: "10px",
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: "12px",
-      lineHeight: 1.45,
-      color: lightMode ? "#1d4ed8" : "#bfdbfe",
-      fontWeight: 600
-    }
-  }, "Local draft available from ", formatRelativeTime(draftRecovery.updatedAt), ". Restore it to recover unsaved edits from this browser."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: "8px",
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: handleRestoreDraft,
-    style: {
-      ...NBTN(lightMode, true),
-      background: lightMode ? "#2563eb" : "#1d4ed8",
-      color: "#fff"
-    }
-  }, "Restore draft"), /*#__PURE__*/React.createElement("button", {
-    onClick: clearCurrentLocalDraft,
-    style: NBTN(lightMode)
-  }, "Discard draft"))), loading ? /*#__PURE__*/React.createElement("div", {
+  }, loading ? /*#__PURE__*/React.createElement("div", {
     style: {
       color: lightMode ? "#64748b" : "#94a3b8",
       padding: "80px",
@@ -8381,11 +7355,7 @@ const handleTeamSave = (newList, newNextId) => {
       fontWeight: 700,
       fontSize: "11px"
     }
-  }, c.icon, " ", c.fullLabel)))), assistantEnabled && !showSettings && !showPrint && !showHuddle && /*#__PURE__*/React.createElement(ScheduleAssistant, {
-    onDismiss: () => setAssistantEnabled(false),
-    contextPrompts: assistantContext.prompts,
-    launcherLabel: assistantContext.launcherLabel
-  }))));
+  }, c.icon, " ", c.fullLabel)))), assistantEnabled && !showSettings && !showPrint && /*#__PURE__*/React.createElement(ScheduleAssistant, null))));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Root));
 </script></body></html>
