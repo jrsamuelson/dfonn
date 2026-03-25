@@ -386,6 +386,15 @@ function getCoverageTargetIdSet(dayData, teamOnns = ONNs) {
   });
   return ids;
 }
+function matchesDayStatusFilter(onn, slot, statusFilter) {
+  if (!statusFilter) return true;
+  if (!onn?.floater) {
+    if (statusFilter === "away") return isAway(slot?.status);
+    return slot?.status === statusFilter;
+  }
+  if (statusFilter === "away") return false;
+  return (slot?.floaterLoc || STATUS.CH) === statusFilter;
+}
 function buildIncomingCoverage(dayData, teamOnns) {
   const availableCoverageIds = getCoverageTargetIdSet(dayData, teamOnns);
   const map = {}; // onnId -> [{ doctor, fromOnnName, duty }]
@@ -747,6 +756,7 @@ function sanitizeCoverageAssignmentId(rawId, availableCoverageIds, sourceOnnId) 
 
 function sanitizeDocCoverageForOnn(slot, onn, availableCoverageIds) {
   if (!onn || onn.floater) return {};
+  if (!isAway(slot?.status)) return {};
   const docCoverage = slot?.docCoverage && typeof slot.docCoverage === "object" ? slot.docCoverage : {};
   const nextDocCoverage = {};
   (onn.primary || []).forEach(doc => {
@@ -2413,7 +2423,8 @@ function StaffRow({
   const lm = useTheme();
   const c = STATUS_CONFIG[slot.status];
   const away = isAway(slot.status) && !onn.floater; // floaters always appear "present"
-  const [expanded, setExpanded] = React.useState(() => isSingle && away && !onn.floater);
+  const awayCoverageFullyAssigned = away && !onn.floater && (onn.primary || []).length > 0 && (onn.primary || []).every(doc => getDoctorCoverageState(slot, doc, ONNs, coverageTargetIds).fullyAssigned);
+  const [expanded, setExpanded] = React.useState(() => isSingle && away && !onn.floater && !awayCoverageFullyAssigned);
   const [vacEditSignal, setVacEditSignal] = React.useState(0);
   const [incomingExpanded, setIncomingExpanded] = React.useState(true);
   const [tooltip, setTooltip] = React.useState({ visible: false, x: 0, y: 0 });
@@ -2421,6 +2432,7 @@ function StaffRow({
   const prevStatusRef = React.useRef(slot.status);
   const prevEditableRef = React.useRef(editable);
   const prevRowExpandSignalRef = React.useRef(rowExpandSignal);
+  const prevAwayCoverageAssignedRef = React.useRef(awayCoverageFullyAssigned);
   const showTooltip = density <= 1;
   const lockWeekRowHeight = !isSingle && density >= 1 && !editable;
   const shouldLockWeekRowHeight = lockWeekRowHeight && !incomingExpanded && !expanded;
@@ -2458,12 +2470,26 @@ function StaffRow({
     const transitionedToAway = !isAway(prevStatus) && away;
     const justIssuedGlobalHide = rowExpandSignal !== prevRowExpandSignalRef.current && !rowExpandValue;
     if (!justIssuedGlobalHide && editable && !onn.floater && canShowAwayDetails && transitionedToAway && prevEditable) {
-      setExpanded(true);
+      setExpanded(!awayCoverageFullyAssigned);
     }
     prevStatusRef.current = slot.status;
     prevEditableRef.current = editable;
     prevRowExpandSignalRef.current = rowExpandSignal;
-  }, [editable, away, onn.floater, isSingle, density, slot.status, rowExpandSignal, rowExpandValue]);
+  }, [editable, away, onn.floater, isSingle, density, slot.status, rowExpandSignal, rowExpandValue, awayCoverageFullyAssigned]);
+  React.useEffect(() => {
+    if (!isSingle || !away || onn.floater) {
+      prevAwayCoverageAssignedRef.current = awayCoverageFullyAssigned;
+      return;
+    }
+    const becameFullyAssigned = !prevAwayCoverageAssignedRef.current && awayCoverageFullyAssigned;
+    const becameIncomplete = prevAwayCoverageAssignedRef.current && !awayCoverageFullyAssigned;
+    if (becameFullyAssigned) {
+      setExpanded(false);
+    } else if (becameIncomplete) {
+      setExpanded(true);
+    }
+    prevAwayCoverageAssignedRef.current = awayCoverageFullyAssigned;
+  }, [isSingle, away, onn.floater, awayCoverageFullyAssigned]);
   React.useEffect(() => {
     if (!editable || dropRevealSignal === 0) return;
     if ((showWeekIncomingToggle || showDayIncomingToggle) && onn.id === dropRevealOnnId) {
@@ -3187,12 +3213,14 @@ function DayCard({
   const working = regularsForStats.length - vac + activeFloatersForStats.length; // floaters always count as working
   const incomingMap = buildIncomingCoverage(dayData, ONNs);
   const visibleRegulars = regulars.filter(onn => {
-    if (!statusFilter || editable) return true;
-    const slot = getSlot(dayData, onn.id);
-    if (statusFilter === 'away') return isAway(slot.status);
-    return slot.status === statusFilter;
+    if (editable) return true;
+    return matchesDayStatusFilter(onn, getSlot(dayData, onn.id), statusFilter);
   });
-  const combinedVisibleRows = [...visibleRegulars, ...activeFloaters];
+  const visibleFloaters = activeFloaters.filter(onn => {
+    if (editable) return true;
+    return matchesDayStatusFilter(onn, getSlot(dayData, onn.id), statusFilter);
+  });
+  const combinedVisibleRows = [...visibleRegulars, ...visibleFloaters];
 
   // ── FIX: In edit mode the staff list must NOT flex-grow to fill a fixed card
   // height. Instead, let it size to content so FloaterPicker pushes the card
