@@ -112,21 +112,36 @@ const STATUS = {
 };
 const STATUS_CYCLE = [STATUS.CH, STATUS.LW, STATUS.REMOTE, STATUS.OFF, STATUS.VACATION];
 const STATUS_CYCLE_FLOATER = [STATUS.CH, STATUS.LW, STATUS.REMOTE, STATUS.OFF];
+const BRAND = {
+  blue: "#00629B",
+  blueDark: "#004B75",
+  blueSoft: "#E3EFF6",
+  blueInk: "#14384D",
+  orange: "#FFA300",
+  orangeDark: "#A86D00",
+  orangeSoft: "#FFF1D6",
+  orangeGlow: "#FFD28A",
+  gray: "#63666A",
+  grayDark: "#45484B",
+  graySoft: "#F2F3F4",
+  grayBorder: "#D4D7DA",
+  whiteInk: "#F8FAFC"
+};
 const STATUS_CONFIG = {
   [STATUS.CH]: {
     label: "CH",
     fullLabel: "In Person · CH",
     icon: "🏥",
-    color: "#0369a1",
-    bg: "#e0f2fe",
+    color: BRAND.blue,
+    bg: BRAND.blueSoft,
     away: false
   },
   [STATUS.LW]: {
     label: "LW",
     fullLabel: "In Person · LW",
     icon: "🏥",
-    color: "#6d28d9",
-    bg: "#ede9fe",
+    color: BRAND.gray,
+    bg: BRAND.graySoft,
     away: false
   },
   [STATUS.REMOTE]: {
@@ -149,8 +164,8 @@ const STATUS_CONFIG = {
     label: "Vacation",
     fullLabel: "Vacation",
     icon: "✈️",
-    color: "#b45309",
-    bg: "#fef3c7",
+    color: BRAND.orangeDark,
+    bg: BRAND.orangeSoft,
     away: true
   }
 };
@@ -631,15 +646,30 @@ function isEditLockActive(lock, now = Date.now()) {
 function formatRelativeTime(value) {
   const ts = Date.parse(value || "");
   if (!Number.isFinite(ts)) return "";
-  const diffMs = ts - Date.now();
-  const absMs = Math.abs(diffMs);
-  if (absMs < 45 * 1000) return diffMs >= 0 ? "in a few seconds" : "just now";
-  if (absMs < 60 * 60 * 1000) {
-    const mins = Math.round(absMs / (60 * 1000));
-    return diffMs >= 0 ? `in ${mins} min` : `${mins} min ago`;
-  }
-  const hours = Math.round(absMs / (60 * 60 * 1000));
-  return diffMs >= 0 ? `in ${hours} hr` : `${hours} hr ago`;
+  const elapsedMs = Math.max(0, Date.now() - ts);
+  if (elapsedMs < 45 * 1000) return "just now";
+  const units = [{
+    ms: 365 * 24 * 60 * 60 * 1000,
+    label: "year"
+  }, {
+    ms: 30 * 24 * 60 * 60 * 1000,
+    label: "month"
+  }, {
+    ms: 7 * 24 * 60 * 60 * 1000,
+    label: "week"
+  }, {
+    ms: 24 * 60 * 60 * 1000,
+    label: "day"
+  }, {
+    ms: 60 * 60 * 1000,
+    label: "hour"
+  }, {
+    ms: 60 * 1000,
+    label: "minute"
+  }];
+  const match = units.find(unit => elapsedMs >= unit.ms) || units[units.length - 1];
+  const amount = Math.floor(elapsedMs / match.ms) || 1;
+  return `${amount} ${match.label}${amount === 1 ? "" : "s"} ago`;
 }
 
 async function loadWeekLock(ws) {
@@ -1568,9 +1598,9 @@ function useViewportWidth() {
 // ─── STYLE CONSTANTS ─────────────────────────────────────────────────────────
 
 const NAV_BTN = (lm = false) => ({
-  background: lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)",
-  border: lm ? "1px solid rgba(0,0,0,0.12)" : "1px solid rgba(255,255,255,0.1)",
-  color: lm ? "#374151" : "#cbd5e1",
+  background: lm ? BRAND.graySoft : "rgba(255,255,255,0.08)",
+  border: lm ? `1px solid ${BRAND.grayBorder}` : "1px solid rgba(255,255,255,0.12)",
+  color: lm ? BRAND.grayDark : "#d8dde1",
   width: "30px",
   height: "30px",
   borderRadius: "8px",
@@ -1582,7 +1612,7 @@ const NAV_BTN = (lm = false) => ({
   fontFamily: "inherit"
 });
 const PRI_BTN = {
-  background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+  background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
   border: "none",
   color: "#fff",
   padding: "7px 15px",
@@ -1593,9 +1623,9 @@ const PRI_BTN = {
   fontFamily: "inherit"
 };
 const SEC_BTN = (lm = false) => ({
-  background: lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
-  border: lm ? "1px solid #e2e8f0" : "1px solid rgba(255,255,255,0.12)",
-  color: lm ? "#374151" : "#cbd5e1",
+  background: lm ? BRAND.graySoft : "rgba(255,255,255,0.06)",
+  border: lm ? `1px solid ${BRAND.grayBorder}` : "1px solid rgba(255,255,255,0.12)",
+  color: lm ? BRAND.grayDark : "#d8dde1",
   padding: "7px 15px",
   borderRadius: "9px",
   cursor: "pointer",
@@ -1605,8 +1635,8 @@ const SEC_BTN = (lm = false) => ({
 });
 const GHOST_BTN = (lm = false) => ({
   background: "transparent",
-  border: lm ? "1px solid rgba(0,0,0,0.15)" : "1px solid rgba(255,255,255,0.12)",
-  color: lm ? "#475569" : "#94a3b8",
+  border: lm ? `1px solid ${BRAND.grayBorder}` : "1px solid rgba(255,255,255,0.12)",
+  color: lm ? BRAND.gray : "#bfc6cb",
   padding: "7px 13px",
   borderRadius: "9px",
   cursor: "pointer",
@@ -1623,8 +1653,8 @@ const NBTN = (lm = false, active = false) => ({
   fontSize: "12px",
   fontWeight: 600,
   cursor: "pointer",
-  background: active ? "linear-gradient(135deg,#6366f1,#8b5cf6)" : lm ? "#f1f5f9" : "rgba(255,255,255,0.09)",
-  color: active ? "#fff" : lm ? "#374151" : "#cbd5e1",
+  background: active ? `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})` : lm ? BRAND.graySoft : "rgba(255,255,255,0.09)",
+  color: active ? "#fff" : lm ? BRAND.grayDark : "#d8dde1",
   display: "flex",
   alignItems: "center",
   gap: "5px",
@@ -1635,8 +1665,8 @@ const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => ({
   padding: ts === 2 ? "10px 20px" : ts === 1 ? "8px 17px" : "7px 15px",
   borderRadius: "12px",
   border: active ? "none" : `1px solid ${lm ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"}`,
-  background: active ? isToday ? "#4f46e5" : lm ? "#e0e7ff" : "#64748b" : lm ? "rgba(0,0,0,0.06)" : "#475569",
-  color: active ? isToday ? "#fff" : lm ? "#3730a3" : "#ffffff" : lm ? "#374151" : "#f1f5f9",
+  background: active ? isToday ? BRAND.blue : lm ? BRAND.orangeSoft : "rgba(255,163,0,0.24)" : lm ? BRAND.graySoft : BRAND.gray,
+  color: active ? isToday ? "#fff" : lm ? BRAND.orangeDark : BRAND.orangeGlow : lm ? BRAND.grayDark : BRAND.whiteInk,
   fontWeight: active ? 700 : 500,
   fontSize: ts === 2 ? "15px" : ts === 1 ? "13px" : "12px",
   cursor: "pointer",
@@ -1651,12 +1681,12 @@ const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => ({
 const TH = {
   padding: "7px 9px",
   textAlign: "left",
-  border: "1px solid #e2e8f0",
+  border: `1px solid ${BRAND.grayBorder}`,
   fontWeight: 700
 };
 const TD = {
   padding: "6px 9px",
-  border: "1px solid #e2e8f0",
+  border: `1px solid ${BRAND.grayBorder}`,
   verticalAlign: "middle"
 };
 
@@ -1939,9 +1969,9 @@ function VacCoveragePanel({
         marginTop: "2px",
         fontSize: "0.72em",
         fontWeight: 700,
-        color: "#6366f1",
-        background: "#eef2ff",
-        border: "1px solid #c7d2fe",
+        color: BRAND.blue,
+        background: BRAND.orangeSoft,
+        border: `1px solid ${BRAND.orangeGlow}`,
         padding: "2px 7px",
         borderRadius: "5px",
         cursor: "pointer",
@@ -2138,9 +2168,9 @@ function VacationReturnBadge({
       },
       style: {
         fontSize: "0.75em",
-        color: "#6366f1",
-        background: "#eef2ff",
-        border: "1px solid #c7d2fe",
+        color: BRAND.blue,
+        background: BRAND.orangeSoft,
+        border: `1px solid ${BRAND.orangeGlow}`,
         borderRadius: "5px",
         padding: "2px 6px",
         cursor: "pointer",
@@ -2213,9 +2243,9 @@ function VacationReturnBadge({
     style: {
       fontSize: "0.75em",
       fontWeight: 700,
-      color: "#6366f1",
-      background: "#eef2ff",
-      border: "1px solid #c7d2fe",
+      color: BRAND.blue,
+      background: BRAND.orangeSoft,
+      border: `1px solid ${BRAND.orangeGlow}`,
       borderRadius: "8px",
       padding: "2px 8px",
       cursor: "pointer",
@@ -2370,7 +2400,7 @@ function CompactCoverageText({
         marginTop: "2px",
         fontSize: "0.72em",
         fontWeight: 700,
-        color: "#6366f1",
+        color: BRAND.blue,
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2674,7 +2704,7 @@ function StaffRow({
       onClick: () => setExpanded(e => !e),
       style: {
         fontSize: "0.9em",
-        color: "#6366f1",
+        color: BRAND.blue,
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2690,7 +2720,7 @@ function StaffRow({
       onClick: () => setExpanded(e => !e),
       style: {
         fontSize: "0.9em",
-        color: "#6366f1",
+        color: BRAND.blue,
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2705,7 +2735,7 @@ function StaffRow({
     onClick: () => setExpanded(e => !e),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: BRAND.blue,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2719,7 +2749,7 @@ function StaffRow({
     onClick: () => setExpanded(e => !e),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: BRAND.blue,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2733,7 +2763,7 @@ function StaffRow({
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: BRAND.blue,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2747,7 +2777,7 @@ function StaffRow({
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: BRAND.blue,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2809,8 +2839,8 @@ function StaffRow({
       marginTop: "5px",
       padding: "8px 9px",
       borderRadius: "8px",
-      border: "1px dashed #a5b4fc",
-      background: "#eef2ff",
+      border: `1px dashed ${BRAND.orangeGlow}`,
+      background: BRAND.orangeSoft,
       display: "flex",
       gap: "8px",
       alignItems: "center",
@@ -2828,9 +2858,9 @@ function StaffRow({
       border: "#86efac",
       bg: "#dcfce7"
     } : {
-      color: "#6d28d9",
-      border: "#c4b5fd",
-      bg: "#ede9fe"
+      color: BRAND.orangeDark,
+      border: BRAND.orangeGlow,
+      bg: BRAND.orangeSoft
     };
     return /*#__PURE__*/React.createElement("button", {
       key: mode,
@@ -2908,7 +2938,7 @@ function StaffRow({
       marginTop: "2px",
       fontSize: "0.72em",
       fontWeight: 700,
-      color: "#6366f1",
+      color: BRAND.blue,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2947,7 +2977,7 @@ function StaffRow({
       marginBottom: "2px",
       fontSize: "0.72em",
       fontWeight: 700,
-      color: "#6366f1",
+      color: BRAND.blue,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -3323,12 +3353,12 @@ function DayCard({
       // no minHeight — content sizes the card
       display: "flex",
       flexDirection: "column",
-      boxShadow: isToday ? "0 4px 28px rgba(99,102,241,0.25)" : "0 2px 14px rgba(0,0,0,0.08)"
+      boxShadow: isToday ? "0 6px 28px rgba(0,98,155,0.22)" : "0 2px 14px rgba(0,0,0,0.08)"
     }
   }, /*#__PURE__*/React.createElement("div", {
     onClick: onHeaderClick,
     style: {
-      background: dayData.holiday ? "#78716c" : isToday ? "#4f46e5" : lm ? "#64748b" : "#475569",
+      background: dayData.holiday ? BRAND.gray : isToday ? BRAND.blue : lm ? BRAND.gray : BRAND.blueInk,
       padding: "12px 14px",
       color: "#fff",
       flexShrink: 0,
@@ -4329,8 +4359,8 @@ function MonthBtn({
   onClick
 }) {
   const [hovered, setHovered] = React.useState(false);
-  const bg = isCur ? "#6366f1" : hovered ? lightMode ? "#e0e7ff" : "rgba(255,255,255,0.22)" : lightMode ? "#f1f5f9" : "rgba(255,255,255,0.1)";
-  const color = isCur ? "#fff" : hovered ? lightMode ? "#4338ca" : "#fff" : lightMode ? "#374151" : "#e2e8f0";
+  const bg = isCur ? BRAND.blue : hovered ? lightMode ? BRAND.orangeSoft : "rgba(255,163,0,0.22)" : lightMode ? BRAND.graySoft : "rgba(255,255,255,0.1)";
+  const color = isCur ? "#fff" : hovered ? lightMode ? BRAND.orangeDark : "#fff" : lightMode ? BRAND.grayDark : "#e2e8f0";
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     onMouseEnter: () => setHovered(true),
@@ -4349,14 +4379,16 @@ function MonthBtn({
     }
   }, label);
 }
-function ScheduleAssistant() {
+function ScheduleAssistant({
+  onDismiss = null
+}) {
   const lightMode = useTheme();
   const viewportWidth = useViewportWidth();
   const isPhone = viewportWidth <= 640;
   const [expanded, setExpanded] = React.useState(false);
   const [activeGuide, setActiveGuide] = React.useState("overview");
   const bubbleBg = lightMode ? "rgba(255,255,255,0.97)" : "rgba(15,23,42,0.97)";
-  const bubbleBorder = lightMode ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(148,163,184,0.22)";
+  const bubbleBorder = lightMode ? "1px solid rgba(0,98,155,0.18)" : "1px solid rgba(255,163,0,0.22)";
   const bubbleText = lightMode ? "#0f172a" : "#f8fafc";
   const bubbleSub = lightMode ? "#64748b" : "#94a3b8";
   const launcherWidth = isPhone ? "74px" : "84px";
@@ -4391,6 +4423,11 @@ function ScheduleAssistant() {
   const closeHelper = () => {
     setExpanded(false);
     setActiveGuide("overview");
+  };
+  const dismissHelper = event => {
+    event?.stopPropagation?.();
+    closeHelper();
+    if (typeof onDismiss === "function") onDismiss();
   };
   const eyeShell = extra => ({
     position: "absolute",
@@ -4427,7 +4464,29 @@ function ScheduleAssistant() {
       height: 0,
       pointerEvents: "none"
     }
-  }, expanded && /*#__PURE__*/React.createElement("div", {
+  }, typeof onDismiss === "function" && /*#__PURE__*/React.createElement("button", {
+    onClick: dismissHelper,
+    title: "Hide sidekick",
+    "aria-label": "Hide schedule sidekick",
+    style: {
+      position: "absolute",
+      right: isPhone ? "-6px" : "-4px",
+      bottom: isPhone ? "76px" : "86px",
+      width: "24px",
+      height: "24px",
+      borderRadius: "999px",
+      border: lightMode ? `1px solid ${BRAND.grayBorder}` : "1px solid rgba(255,255,255,0.16)",
+      background: lightMode ? "rgba(255,255,255,0.98)" : "rgba(15,23,42,0.94)",
+      color: lightMode ? BRAND.grayDark : "#f8fafc",
+      boxShadow: "0 8px 18px rgba(15,23,42,0.18)",
+      cursor: "pointer",
+      pointerEvents: "auto",
+      zIndex: 12,
+      fontSize: "14px",
+      fontWeight: 800,
+      lineHeight: 1
+    }
+  }, "×"), expanded && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "absolute",
       right: isPhone ? "12px" : "18px",
@@ -4469,7 +4528,7 @@ function ScheduleAssistant() {
       fontWeight: 800,
       letterSpacing: "0.08em",
       textTransform: "uppercase",
-      color: lightMode ? "#7c3aed" : "#c4b5fd",
+      color: lightMode ? BRAND.orangeDark : BRAND.orangeGlow,
       marginBottom: "6px"
     }
   }, activeGuide === "overview" ? "Schedule Sidekick" : activeTopic.icon + " Guide"), /*#__PURE__*/React.createElement("div", {
@@ -4490,8 +4549,8 @@ function ScheduleAssistant() {
     title: "Dismiss helper",
     style: {
       border: "none",
-      background: lightMode ? "rgba(99,102,241,0.08)" : "rgba(255,255,255,0.08)",
-      color: lightMode ? "#6366f1" : "#cbd5e1",
+      background: lightMode ? "rgba(0,98,155,0.08)" : "rgba(255,255,255,0.08)",
+      color: lightMode ? BRAND.blue : "#cbd5e1",
       width: "28px",
       height: "28px",
       borderRadius: "999px",
@@ -4514,8 +4573,8 @@ function ScheduleAssistant() {
       textAlign: "left",
       padding: "10px 12px",
       borderRadius: "12px",
-      border: lightMode ? "1px solid rgba(99,102,241,0.14)" : "1px solid rgba(148,163,184,0.18)",
-      background: lightMode ? "#fafaff" : "rgba(30,41,59,0.72)",
+      border: lightMode ? "1px solid rgba(0,98,155,0.14)" : "1px solid rgba(148,163,184,0.18)",
+      background: lightMode ? BRAND.graySoft : "rgba(30,41,59,0.72)",
       color: bubbleText,
       cursor: "pointer",
       fontFamily: "inherit"
@@ -4561,8 +4620,8 @@ function ScheduleAssistant() {
       width: "20px",
       height: "20px",
       borderRadius: "999px",
-      background: lightMode ? "#eef2ff" : "rgba(99,102,241,0.22)",
-      color: lightMode ? "#4338ca" : "#c7d2fe",
+      background: lightMode ? BRAND.orangeSoft : "rgba(255,163,0,0.22)",
+      color: lightMode ? BRAND.orangeDark : BRAND.orangeGlow,
       fontSize: "11px",
       fontWeight: 800,
       display: "inline-flex",
@@ -4582,8 +4641,8 @@ function ScheduleAssistant() {
       marginTop: "12px",
       padding: "10px 11px",
       borderRadius: "10px",
-      background: lightMode ? "#eff6ff" : "rgba(30,64,175,0.16)",
-      color: lightMode ? "#1d4ed8" : "#bfdbfe",
+      background: lightMode ? BRAND.blueSoft : "rgba(0,98,155,0.2)",
+      color: lightMode ? BRAND.blueDark : "#b8ddf0",
       fontSize: "11px",
       lineHeight: 1.45,
       fontWeight: 600
@@ -4602,8 +4661,8 @@ function ScheduleAssistant() {
       padding: "8px 11px",
       borderRadius: "10px",
       border: "none",
-      background: lightMode ? "#eef2ff" : "rgba(99,102,241,0.24)",
-      color: lightMode ? "#4338ca" : "#c7d2fe",
+      background: lightMode ? BRAND.orangeSoft : "rgba(255,163,0,0.24)",
+      color: lightMode ? BRAND.orangeDark : BRAND.orangeGlow,
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 700,
@@ -4707,7 +4766,7 @@ function ScheduleAssistant() {
   }, /*#__PURE__*/React.createElement("path", {
     d: "M78 16c22 0 34 16 34 36v53c0 28-19 46-45 46-24 0-41-16-41-39V58c0-18 12-30 29-30s28 11 28 27v49c0 10-6 17-15 17s-15-7-15-17V67",
     fill: "none",
-    stroke: lightMode ? "#8b80d9" : "#c4b5fd",
+    stroke: lightMode ? BRAND.blue : "#9ec8dc",
     strokeWidth: "10",
     strokeLinecap: "round",
     strokeLinejoin: "round"
@@ -5027,7 +5086,7 @@ const addOnn = () => {
       setEditFloat(checked);
     },
     style: {
-      accentColor: "#6366f1"
+      accentColor: BRAND.blue
     }
   }), " Float"), /*#__PURE__*/React.createElement("label", {
     style: {
@@ -5065,7 +5124,7 @@ const addOnn = () => {
       setEditingId(null);
     },
     style: {
-      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
       border: "none",
       color: "#fff",
       padding: "5px 14px",
@@ -5151,9 +5210,9 @@ const addOnn = () => {
   }, "Schedule"), /*#__PURE__*/React.createElement("button", {
     onClick: () => startEdit(onn),
     style: {
-      background: lm ? "#eef2ff" : "rgba(99,102,241,0.15)",
-      border: lm ? "1px solid #a5b4fc" : "1px solid rgba(99,102,241,0.3)",
-      color: lm ? "#4338ca" : "#a5b4fc",
+      background: lm ? BRAND.orangeSoft : "rgba(255,163,0,0.15)",
+      border: lm ? `1px solid ${BRAND.orangeGlow}` : "1px solid rgba(255,163,0,0.3)",
+      color: lm ? BRAND.orangeDark : BRAND.orangeGlow,
       padding: "3px 10px",
       borderRadius: "6px",
       cursor: "pointer",
@@ -5271,8 +5330,8 @@ const addOnn = () => {
     }));
   }))))))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: lm ? "rgba(99,102,241,0.05)" : "rgba(99,102,241,0.08)",
-      border: "1px dashed rgba(99,102,241,0.3)",
+      background: lm ? "rgba(255,163,0,0.08)" : "rgba(255,163,0,0.12)",
+      border: "1px dashed rgba(255,163,0,0.34)",
       borderRadius: "10px",
       padding: "12px 14px"
     }
@@ -5280,7 +5339,7 @@ const addOnn = () => {
     style: {
       fontSize: "10px",
       fontWeight: 800,
-      color: lm ? "#4f46e5" : "#818cf8",
+      color: lm ? BRAND.orangeDark : BRAND.orangeGlow,
       letterSpacing: "0.07em",
       textTransform: "uppercase",
       marginBottom: "10px"
@@ -5332,13 +5391,13 @@ const addOnn = () => {
     checked: newFloat,
     onChange: e => setNewFloat(e.target.checked),
     style: {
-      accentColor: "#6366f1"
+      accentColor: BRAND.blue
     }
   }), " Float"), /*#__PURE__*/React.createElement("button", {
     onClick: addOnn,
     disabled: !newName.trim(),
     style: {
-      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
       border: "none",
       color: "#fff",
       padding: "6px 18px",
@@ -5363,7 +5422,7 @@ const addOnn = () => {
       padding: "8px 24px",
       borderRadius: "9px",
       border: "none",
-      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
       color: "#fff",
       fontFamily: "inherit",
       fontSize: "13px",
@@ -5552,8 +5611,8 @@ function SettingsModal({
     fontSize: "12px",
     flex: isPhone ? 1 : undefined,
     cursor: "pointer",
-    background: tab === t ? lm ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
-    color: tab === t ? lm ? "#4338ca" : "#a5b4fc" : lm ? "#64748b" : "#94a3b8"
+    background: tab === t ? lm ? BRAND.orangeSoft : "rgba(255,163,0,0.2)" : "transparent",
+    color: tab === t ? lm ? BRAND.orangeDark : BRAND.orangeGlow : lm ? BRAND.gray : "#94a3b8"
   });
   const settingRow = {
     display: "flex",
@@ -5968,7 +6027,7 @@ function SettingsModal({
       padding: "8px 24px",
       borderRadius: "9px",
       border: "none",
-      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
       color: "#fff",
       fontFamily: "inherit",
       fontSize: "13px",
@@ -5987,7 +6046,7 @@ function AuthShell({
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      background: "linear-gradient(160deg,#f0f4ff 0%,#faf5ff 55%,#f0fdf4 100%)",
+      background: "linear-gradient(160deg,#f4f7f8 0%,#ffffff 58%,#fff7eb 100%)",
       fontFamily: "'DM Sans','Segoe UI',sans-serif"
     }
   }, children);
@@ -6010,7 +6069,7 @@ function AuthLoadingScreen() {
       fontSize: "14px",
       letterSpacing: "0.12em",
       textTransform: "uppercase",
-      color: "#6366f1",
+      color: BRAND.blue,
       fontWeight: 700,
       marginBottom: "10px"
     }
@@ -6051,7 +6110,7 @@ function SharedPasswordGate({
       fontSize: "14px",
       letterSpacing: "0.12em",
       textTransform: "uppercase",
-      color: "#6366f1",
+      color: BRAND.orangeDark,
       fontWeight: 700,
       marginBottom: "10px"
     }
@@ -6085,7 +6144,7 @@ function SharedPasswordGate({
       width: "100%",
       padding: "13px 15px",
       borderRadius: "14px",
-      border: "1px solid #cbd5e1",
+      border: `1px solid ${BRAND.grayBorder}`,
       background: "#fff",
       color: "#0f172a",
       fontFamily: "inherit",
@@ -6112,7 +6171,7 @@ function SharedPasswordGate({
       padding: "13px 18px",
       borderRadius: "14px",
       border: "none",
-      background: "linear-gradient(135deg,#4f46e5,#0f766e)",
+      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
       color: "#fff",
       fontFamily: "inherit",
       fontSize: "14px",
@@ -6169,7 +6228,9 @@ function Root() {
         window.removeEventListener("onn-auth-required", handleAuthRequired);
       };
     }
-    authClient.status().catch(() => {
+    authClient.status().then(status => {
+      applyState(status);
+    }).catch(() => {
       if (cancelled) return;
       setAuthState(prev => ({
         ...prev,
@@ -6273,6 +6334,7 @@ function App({
   const isPhone = viewportWidth <= 640;
   const isNarrowLayout = viewportWidth <= 900;
   const pagePad = isPhone ? "14px" : isNarrowLayout ? "18px" : "28px";
+  const isLocalOfflineMode = typeof window !== "undefined" && (window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.endsWith(".local"));
   const weekStart = getWeekStart(weekOffset);
   const weekDates = getWeekDates(weekStart);
   const refreshWeekActivity = React.useCallback(async () => {
@@ -6334,45 +6396,54 @@ function App({
 
   const todayStr = new Date().toDateString();
   const T = lightMode ? {
-    pageBg: "linear-gradient(160deg,#f0f4ff 0%,#faf5ff 55%,#f0fdf4 100%)",
+    pageBg: "linear-gradient(160deg,#f4f7f8 0%,#ffffff 58%,#fff7eb 100%)",
     navBg: "#ffffff",
-    navBorder: "rgba(0,0,0,0.08)",
-    navTitle: "#1e293b",
-    navSub: "#64748b",
+    navBorder: "rgba(99,102,106,0.14)",
+    navTitle: BRAND.blue,
+    navSub: BRAND.gray,
     statsBg: "#ffffff",
-    statsBorder: "rgba(0,0,0,0.06)",
-    tabActive: "rgba(99,102,241,0.12)",
-    tabActiveTxt: "#4f46e5",
-    tabInactive: "rgba(0,0,0,0.04)",
-    tabBorder: "rgba(0,0,0,0.08)",
-    tabTxt: "#64748b",
-    legendBg: "rgba(0,0,0,0.03)",
-    legendBorder: "rgba(0,0,0,0.06)",
-    scrollThumb: "#cbd5e1"
+    statsBorder: "rgba(99,102,106,0.08)",
+    tabActive: "rgba(255,163,0,0.16)",
+    tabActiveTxt: BRAND.orangeDark,
+    tabInactive: "rgba(99,102,106,0.06)",
+    tabBorder: "rgba(99,102,106,0.12)",
+    tabTxt: BRAND.gray,
+    legendBg: "rgba(99,102,106,0.05)",
+    legendBorder: "rgba(99,102,106,0.08)",
+    scrollThumb: BRAND.grayBorder
   } : {
-    pageBg: "linear-gradient(160deg,#0f172a 0%,#1e293b 55%,#0c1a2e 100%)",
-    navBg: "#0f172a",
+    pageBg: "linear-gradient(160deg,#0f2533 0%,#14384d 58%,#31291f 100%)",
+    navBg: "#102b3b",
     navBorder: "rgba(255,255,255,0.1)",
     navTitle: "#f8fafc",
-    navSub: "#94a3b8",
-    statsBg: "#0f172a",
+    navSub: "#c0c4c7",
+    statsBg: "#102b3b",
     statsBorder: "rgba(255,255,255,0.07)",
-    tabActive: "rgba(255,255,255,0.12)",
-    tabActiveTxt: "#ffffff",
+    tabActive: "rgba(255,163,0,0.22)",
+    tabActiveTxt: BRAND.orangeGlow,
     tabInactive: "rgba(255,255,255,0.03)",
     tabBorder: "rgba(255,255,255,0.08)",
-    tabTxt: "#94a3b8",
+    tabTxt: "#c0c4c7",
     legendBg: "rgba(255,255,255,0.03)",
     legendBorder: "rgba(255,255,255,0.07)",
-    scrollThumb: "#334155"
+    scrollThumb: BRAND.gray
   };
 
 	useEffect(() => {
+    let cancelled = false;
+    if (isLocalOfflineMode) {
+      const defaultTeam = sortONNs(normalizeTeam(ONNs));
+      const defaultMaxId = defaultTeam.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
+      setTeamList(defaultTeam);
+      setTeamNextId(defaultMaxId + 1);
+      setTeamLoaded(true);
+    }
 	  Promise.all([loadTeam(), loadNextId()]).then(([savedTeam, savedNextId]) => {
+      if (cancelled) return;
 		const team = savedTeam && savedTeam.length > 0
 		  ? sortONNs(normalizeTeam(savedTeam))
 		  : sortONNs(normalizeTeam(ONNs));
-		if (savedTeam && savedTeam.length > 0) setTeamList(team);
+		setTeamList(team);
 		// High-water mark: never let a new ID equal any ID that has ever existed.
 		const maxFromTeam = team.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
 		const hwm = Math.max(
@@ -6382,16 +6453,25 @@ function App({
 		setTeamNextId(hwm);
 		setTeamLoaded(true);
 	  }).catch(err => {
+      if (cancelled) return;
 		if (err?.code !== "auth") {
 		  console.error("ONN Scheduler team load error:", err);
 		}
 		setTeamLoaded(true);
 	  });
-	}, []);
+    return () => {
+      cancelled = true;
+    };
+	}, [isLocalOfflineMode]);
   useEffect(() => {
     if (!teamLoaded) return;
     let cancelled = false;
-    setLoading(true);
+    if (isLocalOfflineMode) {
+      setWeekData(syncWeekDataToTeam(buildDefault(teamList), teamList));
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     setEditMode(false);
     setHasUnsaved(false);
     loadWeekWithCarryover(weekStart, teamList).then(async ({
@@ -6420,7 +6500,7 @@ function App({
     return () => {
       cancelled = true;
     };
-  }, [weekOffset, teamList, teamLoaded]);
+  }, [weekOffset, teamList, teamLoaded, isLocalOfflineMode]);
   useEffect(() => {
     if (!teamLoaded) return;
     let cancelled = false;
@@ -6732,7 +6812,7 @@ function App({
     remote: "WFH shifts"
   };
   const displayed = activeDay ? [activeDay] : DAYS;
-  const storageStatusText = StorageAdapter.backendName !== "localStorage" ? `${StorageAdapter.backendName}${weekActivity.savedAt ? ` [saved ${formatRelativeTime(weekActivity.savedAt)}]` : ""}` : "";
+  const storageStatusText = StorageAdapter.backendName !== "localStorage" && weekActivity.savedAt ? `Saved ${formatRelativeTime(weekActivity.savedAt)}` : "";
 const handleTeamSave = (newList, newNextId) => {
   const sorted = sortONNs(normalizeTeam(newList));
   setTeamList(sorted);
@@ -6821,7 +6901,7 @@ const handleTeamSave = (newList, newNextId) => {
         ::-webkit-scrollbar { width:5px; height:5px; }
         ::-webkit-scrollbar-track { background:transparent; }
         ::-webkit-scrollbar-thumb { background:${T.scrollThumb}; border-radius:3px; }
-        textarea:focus, select:focus { outline:2px solid #6366f1 !important; }
+        textarea:focus, select:focus { outline:2px solid ${BRAND.blue} !important; }
         @keyframes onnBuddyFloat {
           0%, 100% { transform: translateY(0px) rotate(6deg); }
           50% { transform: translateY(-6px) rotate(2deg); }
@@ -6861,7 +6941,7 @@ const handleTeamSave = (newList, newNextId) => {
       width: "34px",
       height: "34px",
       borderRadius: "10px",
-      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -6885,12 +6965,12 @@ const handleTeamSave = (newList, newNextId) => {
   }, deptName), storageStatusText && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "9px",
-      color: lightMode ? "#10b981" : "#34d399",
+      color: lightMode ? BRAND.blue : "#8ec5df",
       fontWeight: 700,
       letterSpacing: "0.04em",
       marginTop: "1px"
     }
-  }, "✓ " + storageStatusText))), /*#__PURE__*/React.createElement("div", {
+  }, storageStatusText))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -6938,8 +7018,8 @@ const handleTeamSave = (newList, newNextId) => {
       fontSize: "11px",
       fontWeight: 600,
       border: "none",
-      background: weekOffset !== 0 ? lightMode ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
-      color: weekOffset !== 0 ? lightMode ? "#4338ca" : "#a5b4fc" : "transparent",
+      background: weekOffset !== 0 ? lightMode ? BRAND.orangeSoft : "rgba(255,163,0,0.2)" : "transparent",
+      color: weekOffset !== 0 ? lightMode ? BRAND.orangeDark : BRAND.orangeGlow : "transparent",
       cursor: weekOffset !== 0 ? "pointer" : "default",
       pointerEvents: weekOffset !== 0 ? "auto" : "none",
       minWidth: "52px",
@@ -7075,7 +7155,7 @@ const handleTeamSave = (newList, newNextId) => {
       } : saved ? {
         background: "#10b981"
       } : saving ? {
-        background: "#818cf8"
+        background: BRAND.blueDark
       } : {}),
       opacity: 1,
       cursor: saving ? "default" : "pointer"
@@ -7107,7 +7187,7 @@ const handleTeamSave = (newList, newNextId) => {
     icon: "👥",
     label: "Team",
     value: countableTeam.length,
-    color: "#94a3b8"
+    color: BRAND.gray
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: isPhone ? "none" : "block",
@@ -7126,7 +7206,7 @@ const handleTeamSave = (newList, newNextId) => {
     icon: "🏥",
     label: locLabel.lw,
     value: totals.lw,
-    color: "#c4b5fd"
+    color: BRAND.gray
   }, {
     key: STATUS.REMOTE,
     icon: "🏠",
@@ -7154,8 +7234,8 @@ const handleTeamSave = (newList, newNextId) => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        background: active ? lightMode ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
-        border: active ? "1px solid rgba(99,102,241,0.4)" : "1px solid transparent",
+        background: active ? lightMode ? BRAND.orangeSoft : "rgba(255,163,0,0.18)" : "transparent",
+        border: active ? "1px solid rgba(255,163,0,0.36)" : "1px solid transparent",
         borderRadius: "10px",
         padding: "4px 10px",
         cursor: "pointer",
@@ -7168,7 +7248,7 @@ const handleTeamSave = (newList, newNextId) => {
       style: {
         fontSize: "18px",
         fontWeight: 800,
-        color: active ? lightMode ? "#4338ca" : color : color,
+        color: active ? lightMode ? BRAND.orangeDark : BRAND.orangeGlow : color,
         lineHeight: 1
       }
     }, value), /*#__PURE__*/React.createElement("div", {
@@ -7383,7 +7463,9 @@ const handleTeamSave = (newList, newNextId) => {
       fontWeight: 700,
       fontSize: "11px"
     }
-  }, c.icon, " ", c.fullLabel)))), assistantEnabled && !showSettings && !showPrint && /*#__PURE__*/React.createElement(ScheduleAssistant, null))));
+  }, c.icon, " ", c.fullLabel)))), assistantEnabled && !showSettings && !showPrint && /*#__PURE__*/React.createElement(ScheduleAssistant, {
+    onDismiss: () => setAssistantEnabled(false)
+  }))));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Root));
 </script></body></html>

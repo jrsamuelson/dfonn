@@ -46,6 +46,8 @@ Important behavior:
 
 Open `index.html` in a browser.
 
+For the most reliable local use on macOS, double-click [`Open ONN Local.command`](./Open%20ONN%20Local.command). It starts a small local web server and opens the app at `http://127.0.0.1/...`, which avoids flaky `file://` behavior.
+
 If you want to test the shared backend locally instead of plain `localStorage`, install dependencies and run Netlify locally:
 
 ```bash

@@ -79,8 +79,14 @@
   }
 
   function createAuthClient() {
+    const canBypassAuthLocally =
+      window.location.protocol === "file:" ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1" ||
+      window.location.hostname.endsWith(".local");
+
     async function request(action, init) {
-      if (window.location.protocol === "file:") {
+      if (canBypassAuthLocally) {
         return {
           ok: true,
           status: 200,
