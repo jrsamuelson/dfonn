@@ -1664,9 +1664,9 @@ const NBTN = (lm = false, active = false) => ({
 const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => ({
   padding: ts === 2 ? "10px 20px" : ts === 1 ? "8px 17px" : "7px 15px",
   borderRadius: "12px",
-  border: active ? "none" : `1px solid ${lm ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"}`,
-  background: active ? isToday ? BRAND.blue : lm ? BRAND.orangeSoft : "rgba(255,163,0,0.24)" : lm ? BRAND.graySoft : BRAND.gray,
-  color: active ? isToday ? "#fff" : lm ? BRAND.orangeDark : BRAND.orangeGlow : lm ? BRAND.grayDark : BRAND.whiteInk,
+  border: active ? "none" : `1px solid ${lm ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.08)"}`,
+  background: active ? isToday ? BRAND.blue : lm ? BRAND.gray : "rgba(99,102,106,0.72)" : lm ? "rgba(99,102,106,0.84)" : BRAND.gray,
+  color: "#fff",
   fontWeight: active ? 700 : 500,
   fontSize: ts === 2 ? "15px" : ts === 1 ? "13px" : "12px",
   cursor: "pointer",
