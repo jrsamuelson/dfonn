@@ -112,166 +112,21 @@ const STATUS = {
 };
 const STATUS_CYCLE = [STATUS.CH, STATUS.LW, STATUS.REMOTE, STATUS.OFF, STATUS.VACATION];
 const STATUS_CYCLE_FLOATER = [STATUS.CH, STATUS.LW, STATUS.REMOTE, STATUS.OFF];
-const BRAND = {
-  blue: "#00629B",
-  blueBright: "#1C7FB8",
-  blueDark: "#004B75",
-  blueDeep: "#0F2E40",
-  blueSoft: "#E3EFF6",
-  blueMist: "#EDF5FA",
-  blueInk: "#14384D",
-  orange: "#FFA300",
-  orangeDark: "#8A5600",
-  orangeInk: "#5A3500",
-  orangeSoft: "#FFE7B8",
-  orangeGlow: "#FFC14D",
-  gray: "#63666A",
-  grayDark: "#45484B",
-  graySoft: "#F2F3F4",
-  grayMist: "#E7EEF3",
-  grayBorder: "#C9D1D7",
-  slate: "#51606B",
-  ink: "#102331",
-  whiteInk: "#F8FAFC"
-};
-const getThemePalette = (light = false) => light ? {
-  pageBg: "linear-gradient(180deg,#eaf3f8 0%,#f6fafc 52%,#ffffff 100%)",
-  navBg: "#ffffff",
-  navBorder: "rgba(20,56,77,0.10)",
-  navTitle: BRAND.blue,
-  navSub: BRAND.slate,
-  statsBg: "rgba(247,250,252,0.96)",
-  statsBorder: "rgba(20,56,77,0.08)",
-  surface: "#ffffff",
-  surfaceAlt: "#F4F8FA",
-  surfaceMuted: "#E7EEF3",
-  surfaceStrong: BRAND.gray,
-  surfaceBorder: "rgba(20,56,77,0.10)",
-  surfaceBorderSoft: "rgba(20,56,77,0.08)",
-  textStrong: BRAND.ink,
-  text: BRAND.blueInk,
-  textMuted: BRAND.slate,
-  textSoft: "#6C7B86",
-  textInverse: "#FFFFFF",
-  controlBg: BRAND.grayMist,
-  controlHover: "#DAE5EC",
-  controlBorder: "#C6D3DB",
-  controlText: BRAND.blueInk,
-  controlTextMuted: BRAND.slate,
-  brandSolid: BRAND.blue,
-  brandStrong: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
-  brandSoftBg: "#E1EEF6",
-  brandSoftBorder: "#BED3E0",
-  brandSoftText: "#0F3E58",
-  highlightBg: BRAND.orangeSoft,
-  highlightStrongBg: BRAND.orange,
-  highlightBorder: "#E3B04E",
-  highlightText: BRAND.orangeInk,
-  highlightStrongText: "#3F2600",
-  calloutBg: "#FFF4DA",
-  calloutBorder: "#E3B04E",
-  calloutText: BRAND.orangeInk,
-  dangerBg: "#FDE8E8",
-  dangerBorder: "#E8B4B4",
-  dangerText: "#B42318",
-  successBg: "#E1F3EA",
-  successBorder: "#9FD0B5",
-  successText: "#0F6B43",
-  dayTabInactiveBg: BRAND.grayMist,
-  dayTabInactiveBorder: "#C6D3DB",
-  dayTabInactiveText: BRAND.blueInk,
-  dayTabActiveNeutral: BRAND.gray,
-  rowAwayBg: "#FFF8F4",
-  rowZebra: "#F7FAFC",
-  rowBorder: "rgba(20,56,77,0.08)",
-  sectionBg: "#F4F8FA",
-  sectionBorder: "#D7E1E8",
-  inputBg: "#F8FBFD",
-  inputBorder: "#C6D3DB",
-  inputText: BRAND.ink,
-  assistantBubbleBg: "rgba(255,255,255,0.98)",
-  assistantBubbleBorder: "1px solid rgba(20,56,77,0.14)",
-  assistantShadow: "0 24px 52px rgba(10,38,56,0.16)",
-  scrollThumb: "#A9BCC9",
-  shadow: "0 14px 36px rgba(10,38,56,0.10)",
-  shadowStrong: "0 18px 42px rgba(0,98,155,0.16)"
-} : {
-  pageBg: "linear-gradient(180deg,#08141D 0%,#0C2030 52%,#102838 100%)",
-  navBg: "#0C1F2D",
-  navBorder: "rgba(174,199,216,0.14)",
-  navTitle: "#F7FBFF",
-  navSub: "#B6C7D2",
-  statsBg: "#0F2432",
-  statsBorder: "rgba(174,199,216,0.12)",
-  surface: "#102635",
-  surfaceAlt: "#173647",
-  surfaceMuted: "#1C3C4D",
-  surfaceStrong: "#314C5E",
-  surfaceBorder: "rgba(174,199,216,0.16)",
-  surfaceBorderSoft: "rgba(174,199,216,0.12)",
-  textStrong: "#F7FBFF",
-  text: "#E7F0F6",
-  textMuted: "#B8CAD5",
-  textSoft: "#90A4B2",
-  textInverse: BRAND.ink,
-  controlBg: "#193A4B",
-  controlHover: "#214B5F",
-  controlBorder: "rgba(174,199,216,0.18)",
-  controlText: "#ECF4F9",
-  controlTextMuted: "#C4D3DC",
-  brandSolid: BRAND.blueBright,
-  brandStrong: `linear-gradient(135deg,${BRAND.blueBright},${BRAND.blue})`,
-  brandSoftBg: "rgba(0,98,155,0.24)",
-  brandSoftBorder: "rgba(143,194,220,0.28)",
-  brandSoftText: "#CFE7F3",
-  highlightBg: "rgba(255,163,0,0.18)",
-  highlightStrongBg: BRAND.orange,
-  highlightBorder: "rgba(255,193,77,0.32)",
-  highlightText: "#FFE2A0",
-  highlightStrongText: "#2B1A00",
-  calloutBg: "rgba(255,163,0,0.14)",
-  calloutBorder: "rgba(255,193,77,0.28)",
-  calloutText: "#FFE2A0",
-  dangerBg: "rgba(180,35,24,0.22)",
-  dangerBorder: "rgba(244,162,162,0.28)",
-  dangerText: "#F8C4C4",
-  successBg: "rgba(15,107,67,0.24)",
-  successBorder: "rgba(159,208,181,0.24)",
-  successText: "#C6F0D8",
-  dayTabInactiveBg: "#193A4B",
-  dayTabInactiveBorder: "rgba(174,199,216,0.18)",
-  dayTabInactiveText: "#ECF4F9",
-  dayTabActiveNeutral: "#314C5E",
-  rowAwayBg: "rgba(255,163,0,0.08)",
-  rowZebra: "rgba(255,255,255,0.03)",
-  rowBorder: "rgba(174,199,216,0.10)",
-  sectionBg: "#11293A",
-  sectionBorder: "rgba(174,199,216,0.14)",
-  inputBg: "#0F2331",
-  inputBorder: "rgba(174,199,216,0.20)",
-  inputText: "#F7FBFF",
-  assistantBubbleBg: "rgba(10,24,34,0.98)",
-  assistantBubbleBorder: "1px solid rgba(174,199,216,0.16)",
-  assistantShadow: "0 28px 60px rgba(2,8,14,0.55)",
-  scrollThumb: "#3D5B6B",
-  shadow: "0 20px 46px rgba(2,8,14,0.42)",
-  shadowStrong: "0 24px 56px rgba(0,98,155,0.26)"
-};
 const STATUS_CONFIG = {
   [STATUS.CH]: {
     label: "CH",
     fullLabel: "In Person · CH",
     icon: "🏥",
-    color: BRAND.blue,
-    bg: BRAND.blueSoft,
+    color: "#0369a1",
+    bg: "#e0f2fe",
     away: false
   },
   [STATUS.LW]: {
     label: "LW",
     fullLabel: "In Person · LW",
     icon: "🏥",
-    color: BRAND.gray,
-    bg: BRAND.graySoft,
+    color: "#6d28d9",
+    bg: "#ede9fe",
     away: false
   },
   [STATUS.REMOTE]: {
@@ -294,8 +149,8 @@ const STATUS_CONFIG = {
     label: "Vacation",
     fullLabel: "Vacation",
     icon: "✈️",
-    color: BRAND.orangeDark,
-    bg: BRAND.orangeSoft,
+    color: "#b45309",
+    bg: "#fef3c7",
     away: true
   }
 };
@@ -1728,9 +1583,9 @@ function useViewportWidth() {
 // ─── STYLE CONSTANTS ─────────────────────────────────────────────────────────
 
 const NAV_BTN = (lm = false) => ({
-  background: "var(--onn-control-bg)",
-  border: "1px solid var(--onn-control-border)",
-  color: "var(--onn-control-text)",
+  background: lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)",
+  border: lm ? "1px solid rgba(0,0,0,0.12)" : "1px solid rgba(255,255,255,0.1)",
+  color: lm ? "#374151" : "#cbd5e1",
   width: "30px",
   height: "30px",
   borderRadius: "8px",
@@ -1742,7 +1597,7 @@ const NAV_BTN = (lm = false) => ({
   fontFamily: "inherit"
 });
 const PRI_BTN = {
-  background: "var(--onn-brand-strong)",
+  background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
   border: "none",
   color: "#fff",
   padding: "7px 15px",
@@ -1753,9 +1608,9 @@ const PRI_BTN = {
   fontFamily: "inherit"
 };
 const SEC_BTN = (lm = false) => ({
-  background: "var(--onn-control-bg)",
-  border: "1px solid var(--onn-control-border)",
-  color: "var(--onn-control-text)",
+  background: lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
+  border: lm ? "1px solid #e2e8f0" : "1px solid rgba(255,255,255,0.12)",
+  color: lm ? "#374151" : "#cbd5e1",
   padding: "7px 15px",
   borderRadius: "9px",
   cursor: "pointer",
@@ -1765,8 +1620,8 @@ const SEC_BTN = (lm = false) => ({
 });
 const GHOST_BTN = (lm = false) => ({
   background: "transparent",
-  border: "1px solid var(--onn-control-border)",
-  color: "var(--onn-control-text-muted)",
+  border: lm ? "1px solid rgba(0,0,0,0.15)" : "1px solid rgba(255,255,255,0.12)",
+  color: lm ? "#475569" : "#94a3b8",
   padding: "7px 13px",
   borderRadius: "9px",
   cursor: "pointer",
@@ -1783,8 +1638,8 @@ const NBTN = (lm = false, active = false) => ({
   fontSize: "12px",
   fontWeight: 600,
   cursor: "pointer",
-  background: active ? "var(--onn-brand-strong)" : "var(--onn-control-bg)",
-  color: active ? "#fff" : "var(--onn-control-text)",
+  background: active ? "linear-gradient(135deg,#6366f1,#8b5cf6)" : lm ? "#f1f5f9" : "rgba(255,255,255,0.09)",
+  color: active ? "#fff" : lm ? "#374151" : "#cbd5e1",
   display: "flex",
   alignItems: "center",
   gap: "5px",
@@ -1794,9 +1649,9 @@ const NBTN = (lm = false, active = false) => ({
 const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => ({
   padding: ts === 2 ? "10px 20px" : ts === 1 ? "8px 17px" : "7px 15px",
   borderRadius: "12px",
-  border: active ? "none" : "1px solid var(--onn-day-tab-border)",
-  background: active ? isToday ? "var(--onn-brand-strong)" : "var(--onn-day-tab-active-neutral)" : "var(--onn-day-tab-bg)",
-  color: active ? "#fff" : "var(--onn-day-tab-text)",
+  border: active ? "none" : `1px solid ${lm ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"}`,
+  background: active ? isToday ? "#4f46e5" : lm ? "#e0e7ff" : "#64748b" : lm ? "rgba(0,0,0,0.06)" : "#475569",
+  color: active ? isToday ? "#fff" : lm ? "#3730a3" : "#ffffff" : lm ? "#374151" : "#f1f5f9",
   fontWeight: active ? 700 : 500,
   fontSize: ts === 2 ? "15px" : ts === 1 ? "13px" : "12px",
   cursor: "pointer",
@@ -1811,12 +1666,12 @@ const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => ({
 const TH = {
   padding: "7px 9px",
   textAlign: "left",
-  border: `1px solid ${BRAND.grayBorder}`,
+  border: "1px solid #e2e8f0",
   fontWeight: 700
 };
 const TD = {
   padding: "6px 9px",
-  border: `1px solid ${BRAND.grayBorder}`,
+  border: "1px solid #e2e8f0",
   verticalAlign: "middle"
 };
 
@@ -1924,7 +1779,7 @@ function StatChip({
     }
   }, value)), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "var(--onn-text-soft)",
+      color: "#94a3b8",
       fontSize: "9px",
       fontWeight: 600,
       letterSpacing: "0.06em",
@@ -1944,7 +1799,6 @@ function OnnSelect({
   ONNs,
   placeholder
 }) {
-  const lm = useTheme();
   return /*#__PURE__*/React.createElement("select", {
     value: value || "",
     onChange: e => onChange(e.target.value),
@@ -1953,16 +1807,15 @@ function OnnSelect({
       minWidth: 0,
       padding: "1px 4px",
       borderRadius: "4px",
-      border: "1px solid var(--onn-input-border)",
+      border: "1px solid #e2e8f0",
       fontSize: "10px",
       lineHeight: 1.2,
       fontFamily: "inherit",
       cursor: "pointer",
-      background: value ? "var(--onn-callout-bg)" : "var(--onn-input-bg)",
-      color: value ? "var(--onn-callout-text)" : "var(--onn-text-soft)",
+      background: value ? "#fff7ed" : "#fafafa",
+      color: value ? "#b45309" : "#94a3b8",
       fontWeight: value ? 700 : 400,
-      outline: "none",
-      boxShadow: lm ? "inset 0 1px 0 rgba(255,255,255,0.4)" : "none"
+      outline: "none"
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
@@ -2045,11 +1898,11 @@ function VacCoveragePanel({
           }
         }, doc), " ", /*#__PURE__*/React.createElement("span", {
           style: {
-            color: "var(--onn-text-muted)"
+            color: "#64748b"
           }
         }, "Outlook & Epic to"), " ", /*#__PURE__*/React.createElement("span", {
           style: {
-            color: "var(--onn-text-muted)",
+            color: "#64748b",
             fontWeight: 400
           }
         }, emailOnn.name));
@@ -2067,11 +1920,11 @@ function VacCoveragePanel({
         }
       }, doc), " ", /*#__PURE__*/React.createElement("span", {
         style: {
-          color: "var(--onn-text-muted)"
+          color: "#64748b"
         }
       }, "Outlook to"), " ", /*#__PURE__*/React.createElement("span", {
         style: {
-          color: "var(--onn-text-muted)",
+          color: "#64748b",
           fontWeight: 400
         }
       }, emailOnn.name)), epicOnn && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
@@ -2081,16 +1934,16 @@ function VacCoveragePanel({
         }
       }, doc), " ", /*#__PURE__*/React.createElement("span", {
         style: {
-          color: "var(--onn-text-muted)"
+          color: "#64748b"
         }
       }, "Epic to"), " ", /*#__PURE__*/React.createElement("span", {
         style: {
-          color: "var(--onn-text-muted)",
+          color: "#64748b",
           fontWeight: 400
         }
       }, epicOnn.name)), !emailOnn && !epicOnn && /*#__PURE__*/React.createElement("div", {
         style: {
-          color: "var(--onn-text-soft)",
+          color: "#94a3b8",
           fontStyle: "italic"
         }
       }, doc, " — unassigned"));
@@ -2101,9 +1954,9 @@ function VacCoveragePanel({
         marginTop: "2px",
         fontSize: "0.72em",
         fontWeight: 700,
-        color: "var(--onn-brand-soft-text)",
-        background: "var(--onn-brand-soft-bg)",
-        border: "1px solid var(--onn-brand-soft-border)",
+        color: "#6366f1",
+        background: "#eef2ff",
+        border: "1px solid #c7d2fe",
         padding: "2px 7px",
         borderRadius: "5px",
         cursor: "pointer",
@@ -2129,7 +1982,7 @@ function VacCoveragePanel({
       style: {
         fontSize: "0.8em",
         fontWeight: 700,
-        color: "var(--onn-text-strong)",
+        color: "#374151",
         marginBottom: "2px"
       }
     }, doc), /*#__PURE__*/React.createElement("div", {
@@ -2145,7 +1998,7 @@ function VacCoveragePanel({
       style: {
         fontSize: "0.72em",
         fontWeight: 700,
-        color: "var(--onn-brand-soft-text)",
+        color: "#1d4ed8",
         whiteSpace: "nowrap",
         lineHeight: 1
       }
@@ -2175,6 +2028,7 @@ function VacCoveragePanel({
 function IncomingCoverageBadges({
   items
 }) {
+  const lm = useTheme();
   if (!items || items.length === 0) return null;
   // Group by doctor+fromOnn so same pair shows on one line
   const grouped = [];
@@ -2216,11 +2070,11 @@ function IncomingCoverageBadges({
     }
   }, g.doctor), " ", /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "var(--onn-text-muted)"
+      color: "#64748b"
     }
   }, g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic from" : g.duties.includes("outlook") ? "Outlook from" : "Epic from"), " ", /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "var(--onn-text-muted)",
+      color: "#64748b",
       fontWeight: 500
     }
   }, g.fromOnnName))));
@@ -2265,7 +2119,7 @@ function VacationReturnBadge({
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: "0.75em",
-        color: "var(--onn-callout-text)",
+        color: "#92400e",
         fontWeight: 600
       }
     }, "Returns:"), /*#__PURE__*/React.createElement("input", {
@@ -2280,9 +2134,9 @@ function VacationReturnBadge({
         fontSize: "0.82em",
         padding: "2px 6px",
         borderRadius: "5px",
-        border: "1px solid var(--onn-callout-border)",
-        background: "var(--onn-callout-bg)",
-        color: "var(--onn-callout-text)",
+        border: "1px solid #fcd34d",
+        background: "#fffbeb",
+        color: "#92400e",
         fontFamily: "inherit",
         outline: "none"
       }
@@ -2299,9 +2153,9 @@ function VacationReturnBadge({
       },
       style: {
         fontSize: "0.75em",
-        color: "var(--onn-brand-soft-text)",
-        background: "var(--onn-brand-soft-bg)",
-        border: "1px solid var(--onn-brand-soft-border)",
+        color: "#6366f1",
+        background: "#eef2ff",
+        border: "1px solid #c7d2fe",
         borderRadius: "5px",
         padding: "2px 6px",
         cursor: "pointer",
@@ -2322,9 +2176,9 @@ function VacationReturnBadge({
       },
       style: {
         fontSize: "0.75em",
-        color: "var(--onn-danger-text)",
-        background: "var(--onn-danger-bg)",
-        border: "1px solid var(--onn-danger-border)",
+        color: "#dc2626",
+        background: "#fee2e2",
+        border: "1px solid rgba(239,68,68,0.35)",
         borderRadius: "5px",
         padding: "2px 6px",
         cursor: "pointer",
@@ -2352,11 +2206,11 @@ function VacationReturnBadge({
     style: {
       fontSize: "0.75em",
       fontWeight: 600,
-      color: "var(--onn-callout-text)",
-      background: "var(--onn-callout-bg)",
+      color: "#92400e",
+      background: "#fef3c7",
       padding: "2px 7px",
       borderRadius: "5px",
-      border: "1px solid var(--onn-callout-border)",
+      border: "1px solid #fcd34d",
       cursor: editable ? "pointer" : "default"
     }
   }, "✈️ Returns ", (() => {
@@ -2374,9 +2228,9 @@ function VacationReturnBadge({
     style: {
       fontSize: "0.75em",
       fontWeight: 700,
-      color: "var(--onn-brand-soft-text)",
-      background: "var(--onn-brand-soft-bg)",
-      border: "1px solid var(--onn-brand-soft-border)",
+      color: "#6366f1",
+      background: "#eef2ff",
+      border: "1px solid #c7d2fe",
       borderRadius: "8px",
       padding: "2px 8px",
       cursor: "pointer",
@@ -2414,10 +2268,10 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
       top, left,
       zIndex: 9999,
       width: W + "px",
-      background: "var(--onn-surface)",
+      background: "#fff",
       borderRadius: "14px",
-      boxShadow: "var(--onn-shadow)",
-      border: "1px solid var(--onn-surface-border)",
+      boxShadow: "0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08)",
+      border: "1px solid rgba(0,0,0,0.08)",
       padding: "12px 14px",
       pointerEvents: "none",
       fontFamily: "'DM Sans','Segoe UI',sans-serif"
@@ -2429,10 +2283,10 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
     },
       /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
         /*#__PURE__*/React.createElement("span", {
-          style: { fontWeight: 800, fontSize: "13px", color: "var(--onn-text-strong)" }
+          style: { fontWeight: 800, fontSize: "13px", color: "#111827" }
         }, onn.name),
         onn.floater && /*#__PURE__*/React.createElement("span", {
-          style: { fontSize: "9px", fontWeight: 700, color: "var(--onn-brand-soft-text)", background: "var(--onn-brand-soft-bg)", padding: "1px 5px", borderRadius: "6px" }
+          style: { fontSize: "9px", fontWeight: 700, color: "#0369a1", background: "#e0f2fe", padding: "1px 5px", borderRadius: "6px" }
         }, "FLOAT")
       ),
       /*#__PURE__*/React.createElement("span", {
@@ -2445,11 +2299,11 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
       style: { marginBottom: away || grouped.length ? "8px" : 0 }
     },
       /*#__PURE__*/React.createElement("div", {
-        style: { fontSize: "9px", fontWeight: 700, color: "var(--onn-text-soft)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "4px" }
+        style: { fontSize: "9px", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "4px" }
       }, "Primary Doctors"),
       onn.primary.map(doc => /*#__PURE__*/React.createElement("div", {
         key: doc,
-        style: { fontSize: "11px", fontWeight: 600, color: "var(--onn-brand-soft-text)", marginBottom: "2px" }
+        style: { fontSize: "11px", fontWeight: 600, color: "#1e40af", marginBottom: "2px" }
       }, doc))
     ),
 
@@ -2458,7 +2312,7 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
       style: { marginBottom: grouped.length ? "8px" : 0 }
     },
       /*#__PURE__*/React.createElement("div", {
-        style: { fontSize: "9px", fontWeight: 700, color: "var(--onn-text-soft)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "4px" }
+        style: { fontSize: "9px", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "4px" }
 	      }, "Coverage Assigned"),
 	      onn.primary.map(doc => {
 	        const {
@@ -2469,14 +2323,14 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
 	        const dutyLabel = same ? "Outlook & Epic" : emailOnn ? "Outlook" : epicOnn ? "Epic" : null;
 	        const targetOnn = emailOnn || epicOnn;
         return /*#__PURE__*/React.createElement("div", {
-          key: doc, style: { fontSize: "10px", color: "var(--onn-text)", marginBottom: "2px", display: "flex", gap: "4px", alignItems: "baseline" }
+          key: doc, style: { fontSize: "10px", color: "#374151", marginBottom: "2px", display: "flex", gap: "4px", alignItems: "baseline" }
         },
           /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#dc2626" } }, doc),
           dutyLabel
             ? /*#__PURE__*/React.createElement(React.Fragment, null,
-                /*#__PURE__*/React.createElement("span", { style: { color: "var(--onn-text-muted)" } }, dutyLabel),
-                /*#__PURE__*/React.createElement("span", { style: { color: "var(--onn-text-muted)" } }, "to"),
-                /*#__PURE__*/React.createElement("span", { style: { fontWeight: 400, color: "var(--onn-text-muted)" } }, targetOnn.name)
+                /*#__PURE__*/React.createElement("span", { style: { color: "#64748b" } }, dutyLabel),
+                /*#__PURE__*/React.createElement("span", { style: { color: "#64748b" } }, "to"),
+                /*#__PURE__*/React.createElement("span", { style: { fontWeight: 400, color: "#64748b" } }, targetOnn.name)
               )
             : /*#__PURE__*/React.createElement("span", { style: { color: "#f87171" } }, "⚠ unassigned")
         );
@@ -2486,24 +2340,24 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
     // ── incoming coverage this ONN is doing for others
     grouped.length > 0 && /*#__PURE__*/React.createElement("div", null,
       /*#__PURE__*/React.createElement("div", {
-        style: { fontSize: "9px", fontWeight: 700, color: "var(--onn-text-soft)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "4px" }
+        style: { fontSize: "9px", fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "4px" }
       }, "Covering Today"),
       grouped.map((g, i) => /*#__PURE__*/React.createElement("div", {
-        key: i, style: { fontSize: "10px", color: "var(--onn-text)", marginBottom: "3px" }
+        key: i, style: { fontSize: "10px", color: "#374151", marginBottom: "3px" }
       },
         /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#dc2626" } }, g.doctor),
         " ",
-        /*#__PURE__*/React.createElement("span", { style: { color: "var(--onn-text-muted)" } },
+        /*#__PURE__*/React.createElement("span", { style: { color: "#64748b" } },
           g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic" : g.duties.includes("outlook") ? "Outlook" : "Epic"
         ),
         " from ",
-        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 400, color: "var(--onn-text-muted)" } }, g.fromOnnName)
+        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 400, color: "#64748b" } }, g.fromOnnName)
       ))
     ),
 
     // ── note
     slot.note && /*#__PURE__*/React.createElement("div", {
-      style: { marginTop: "8px", paddingTop: "8px", borderTop: "1px solid var(--onn-surface-border-soft)", fontSize: "10px", color: "var(--onn-text-muted)", fontStyle: "italic" }
+      style: { marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #f1f5f9", fontSize: "10px", color: "#64748b", fontStyle: "italic" }
     }, "📝 ", slot.note)
   );
 }
@@ -2531,7 +2385,7 @@ function CompactCoverageText({
         marginTop: "2px",
         fontSize: "0.72em",
         fontWeight: 700,
-        color: BRAND.blue,
+        color: "#6366f1",
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2749,9 +2603,9 @@ function StaffRow({
       }
     },
     style: {
-      background: away ? "var(--onn-row-away-bg)" : zebra ? "var(--onn-row-zebra)" : "var(--onn-surface)",
+      background: away ? "#fff8f8" : zebra ? "#f7f9fb" : "#ffffff",
       padding: density >= 2 ? "6px 12px" : density === 1 ? "4px 8px" : "3px 6px",
-      borderBottom: "1px solid var(--onn-row-border)",
+      borderBottom: "1px solid rgba(226,232,240,0.6)",
       transition: "background 0.15s",
       flex: density <= 1 ? "1" : undefined,
       display: "flex",
@@ -2783,13 +2637,13 @@ function StaffRow({
       fontSize: density >= 2 ? "0.95em" : "0.82em",
       fontWeight: 800,
       letterSpacing: "-0.01em",
-      color: "var(--onn-text-strong)",
+      color: "#111827",
       whiteSpace: "nowrap",
       overflow: "hidden",
       textOverflow: "ellipsis",
       maxWidth: density >= 3 ? "none" : density === 2 ? "130px" : "80px",
       cursor: showTooltip ? "default" : "inherit",
-      textDecoration: showTooltip ? "underline dotted var(--onn-control-border)" : "none",
+      textDecoration: showTooltip ? "underline dotted #cbd5e1" : "none",
       textUnderlineOffset: "3px"
     }
   }, onn.name), density < 3 && density >= 1 && slot.note && /*#__PURE__*/React.createElement("span", {
@@ -2798,7 +2652,7 @@ function StaffRow({
       width: "7px",
       height: "7px",
       borderRadius: "50%",
-      background: "var(--onn-highlight-strong-bg)",
+      background: "#f59e0b",
       flexShrink: 0,
       display: "inline-block"
     }
@@ -2806,8 +2660,8 @@ function StaffRow({
     style: {
       fontSize: "9px",
       fontWeight: 700,
-      color: "var(--onn-brand-soft-text)",
-      background: "var(--onn-brand-soft-bg)",
+      color: "#0369a1",
+      background: "#e0f2fe",
       padding: "1px 5px",
       borderRadius: "6px",
       flexShrink: 0
@@ -2820,7 +2674,7 @@ function StaffRow({
     title: "Remove float from this day",
     style: {
       fontSize: "0.7em",
-      color: "var(--onn-brand-soft-text)",
+      color: "#0369a1",
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2835,7 +2689,7 @@ function StaffRow({
       onClick: () => setExpanded(e => !e),
       style: {
         fontSize: "0.9em",
-        color: "var(--onn-brand-soft-text)",
+        color: "#6366f1",
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2851,7 +2705,7 @@ function StaffRow({
       onClick: () => setExpanded(e => !e),
       style: {
         fontSize: "0.9em",
-        color: "var(--onn-brand-soft-text)",
+        color: "#6366f1",
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2866,7 +2720,7 @@ function StaffRow({
     onClick: () => setExpanded(e => !e),
     style: {
       fontSize: "0.9em",
-        color: "var(--onn-brand-soft-text)",
+      color: "#6366f1",
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2880,7 +2734,7 @@ function StaffRow({
     onClick: () => setExpanded(e => !e),
     style: {
       fontSize: "0.9em",
-        color: "var(--onn-brand-soft-text)",
+      color: "#6366f1",
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2894,7 +2748,7 @@ function StaffRow({
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
-        color: "var(--onn-brand-soft-text)",
+      color: "#6366f1",
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2908,7 +2762,7 @@ function StaffRow({
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
-        color: "var(--onn-brand-soft-text)",
+      color: "#6366f1",
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2923,7 +2777,7 @@ function StaffRow({
       marginTop: "1px",
       fontSize: "0.76em",
       fontWeight: 500,
-      color: "var(--onn-text-muted)",
+      color: "#475569",
       whiteSpace: "nowrap",
       overflow: "hidden",
       textOverflow: "ellipsis",
@@ -2957,9 +2811,9 @@ function StaffRow({
       alignItems: "center",
       padding: "2px 7px",
       borderRadius: "999px",
-      background: assigned ? "var(--onn-control-bg)" : "var(--onn-danger-bg)",
-      color: assigned ? "var(--onn-control-text)" : "var(--onn-danger-text)",
-      border: assigned ? "1px solid var(--onn-control-border)" : "1px solid var(--onn-danger-border)",
+      background: assigned ? "#f1f5f9" : "#fee2e2",
+      color: assigned ? "#64748b" : "#dc2626",
+      border: assigned ? "1px solid #cbd5e1" : "1px solid #fecaca",
       cursor: "grab",
       fontWeight: 700,
       fontSize: density >= 3 ? "0.88em" : "0.92em"
@@ -2970,8 +2824,8 @@ function StaffRow({
       marginTop: "5px",
       padding: "8px 9px",
       borderRadius: "8px",
-      border: "1px dashed var(--onn-callout-border)",
-      background: "var(--onn-callout-bg)",
+      border: "1px dashed #a5b4fc",
+      background: "#eef2ff",
       display: "flex",
       gap: "8px",
       alignItems: "center",
@@ -2989,9 +2843,9 @@ function StaffRow({
       border: "#86efac",
       bg: "#dcfce7"
     } : {
-      color: "var(--onn-callout-text)",
-      border: "var(--onn-callout-border)",
-      bg: "var(--onn-callout-bg)"
+      color: "#6d28d9",
+      border: "#c4b5fd",
+      bg: "#ede9fe"
     };
     return /*#__PURE__*/React.createElement("button", {
       key: mode,
@@ -3023,10 +2877,10 @@ function StaffRow({
       width: "100%",
       fontSize: "10px",
       fontFamily: "inherit",
-      border: "1px dashed var(--onn-input-border)",
+      border: "1px dashed #cbd5e1",
       borderRadius: "6px",
       padding: "3px 7px",
-      color: "var(--onn-text-muted)",
+      color: "#475569",
       background: "transparent",
       outline: "none",
       order: 99
@@ -3035,7 +2889,7 @@ function StaffRow({
     style: {
       marginTop: "3px",
       fontSize: "10px",
-      color: "var(--onn-text-muted)",
+      color: "#64748b",
       fontStyle: "italic",
       order: 99
     }
@@ -3069,7 +2923,7 @@ function StaffRow({
       marginTop: "2px",
       fontSize: "0.72em",
       fontWeight: 700,
-      color: "var(--onn-brand-soft-text)",
+      color: "#6366f1",
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -3093,7 +2947,7 @@ function StaffRow({
     style: {
       marginTop: "4px",
       paddingTop: density === 2 ? "4px" : 0,
-      borderTop: density === 2 ? "1px dashed var(--onn-brand-soft-border)" : "none",
+      borderTop: density === 2 ? "1px dashed #dbeafe" : "none",
       width: "100%",
       maxWidth: "100%",
       overflow: "visible"
@@ -3108,7 +2962,7 @@ function StaffRow({
       marginBottom: "2px",
       fontSize: "0.72em",
       fontWeight: 700,
-      color: "var(--onn-brand-soft-text)",
+      color: "#6366f1",
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -3165,16 +3019,16 @@ function FloaterPicker({
       minWidth: 0,
       alignSelf: "stretch",
       padding: compact ? "10px 14px" : "8px 16px",
-      background: "var(--onn-brand-soft-bg)",
+      background: "#f0f9ff",
       border: "none",
-      borderTop: "1px dashed var(--onn-brand-soft-border)",
+      borderTop: "1px dashed #bae6fd",
       cursor: "pointer",
       fontFamily: "inherit",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
       gap: "6px",
-      color: "var(--onn-brand-soft-text)",
+      color: "#0369a1",
       fontSize: "10px",
       fontWeight: 700
     }
@@ -3187,7 +3041,7 @@ function FloaterPicker({
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: compact ? "6px 10px" : "8px 12px",
-      background: "var(--onn-brand-soft-bg)",
+      background: "#f0f9ff",
       display: "flex",
       gap: compact ? "4px" : "6px",
       alignItems: "center",
@@ -3200,9 +3054,8 @@ function FloaterPicker({
     style: {
       padding: "4px 8px",
       borderRadius: "6px",
-      border: "1px solid var(--onn-brand-soft-border)",
-      background: "var(--onn-surface)",
-      color: "var(--onn-text-strong)",
+      border: "1px solid #bae6fd",
+      background: "#fff",
       fontSize: "11px",
       fontFamily: "inherit",
       outline: "none",
@@ -3232,11 +3085,11 @@ function FloaterPicker({
         fontWeight: 700,
         padding: "3px 7px",
         borderRadius: "5px",
-        border: active ? `1px solid ${cfg.color}` : "1px solid var(--onn-control-border)",
+        border: active ? `1px solid ${cfg.color}` : "1px solid #e2e8f0",
         cursor: "pointer",
         fontFamily: "inherit",
-        background: active ? cfg.bg : "var(--onn-surface)",
-        color: active ? cfg.color : "var(--onn-text-soft)"
+        background: active ? cfg.bg : "#fff",
+        color: active ? cfg.color : "#94a3b8"
       }
     }, cfg.label);
   })), /*#__PURE__*/React.createElement("button", {
@@ -3246,8 +3099,8 @@ function FloaterPicker({
       padding: "3px 10px",
       borderRadius: "6px",
       border: "none",
-      background: selectedId ? "var(--onn-brand-strong)" : "var(--onn-control-bg)",
-      color: selectedId ? "#fff" : "var(--onn-text-soft)",
+      background: selectedId ? "#0369a1" : "#e2e8f0",
+      color: selectedId ? "#fff" : "#94a3b8",
       fontFamily: "inherit",
       fontSize: "11px",
       fontWeight: 700,
@@ -3258,9 +3111,9 @@ function FloaterPicker({
     style: {
       padding: "3px 8px",
       borderRadius: "6px",
-      border: "1px solid var(--onn-control-border)",
+      border: "1px solid #e2e8f0",
       background: "none",
-      color: "var(--onn-text-soft)",
+      color: "#94a3b8",
       fontFamily: "inherit",
       fontSize: "11px",
       cursor: "pointer"
@@ -3285,9 +3138,9 @@ function FloaterSection({
   if (activeFloaters.length === 0 && (!editable || density < 1 || offFloaters.length === 0)) return null;
   return /*#__PURE__*/React.createElement("div", {
     style: {
-      borderTop: "1px solid var(--onn-section-border)",
+      borderTop: "1px solid #e2e8f0",
       flexShrink: 0,
-      background: "var(--onn-surface)",
+      background: "#fff",
       paddingTop: "2px",
       position: "relative",
       zIndex: 1
@@ -3485,12 +3338,12 @@ function DayCard({
       // no minHeight — content sizes the card
       display: "flex",
       flexDirection: "column",
-      boxShadow: isToday ? "var(--onn-shadow-strong)" : "var(--onn-shadow)"
+      boxShadow: isToday ? "0 4px 28px rgba(99,102,241,0.25)" : "0 2px 14px rgba(0,0,0,0.08)"
     }
   }, /*#__PURE__*/React.createElement("div", {
     onClick: onHeaderClick,
     style: {
-      background: dayData.holiday ? "var(--onn-surface-strong)" : isToday ? "var(--onn-brand-strong)" : "var(--onn-surface-strong)",
+      background: dayData.holiday ? "#78716c" : isToday ? "#4f46e5" : lm ? "#64748b" : "#475569",
       padding: "12px 14px",
       color: "#fff",
       flexShrink: 0,
@@ -3564,12 +3417,12 @@ function DayCard({
     style: {
       fontSize: "14px",
       fontWeight: 800,
-      color: "var(--onn-text-strong)"
+      color: "#78716c"
     }
   }, "Office Closed"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "11px",
-      color: "var(--onn-text-soft)"
+      color: "#a8a29e"
     }
   }, "Holiday — no coverage needed")), density >= 2 && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3577,15 +3430,15 @@ function DayCard({
       justifyContent: "space-between",
       alignItems: "center",
       padding: "5px 12px",
-      background: "var(--onn-section-bg)",
-      borderBottom: "1px solid var(--onn-section-border)",
+      background: "#f8fafc",
+      borderBottom: "1px solid #e8edf2",
       flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: "0.65em",
       fontWeight: 700,
-      color: "var(--onn-text-muted)",
+      color: "#64748b",
       letterSpacing: "0.08em",
       textTransform: "uppercase"
     }
@@ -3593,7 +3446,7 @@ function DayCard({
     style: {
       fontSize: "0.65em",
       fontWeight: 700,
-      color: "var(--onn-text-muted)",
+      color: "#64748b",
       letterSpacing: "0.08em",
       textTransform: "uppercase"
     }
@@ -3652,8 +3505,8 @@ function DayCard({
     const zebra = Math.floor(totalRows / 2) % 2 !== 0;
     return /*#__PURE__*/React.createElement("div", {
       style: {
-        background: zebra ? "var(--onn-row-zebra)" : "var(--onn-surface)",
-        borderBottom: "1px solid var(--onn-row-border)",
+        background: zebra ? "#f7f9fb" : "#ffffff",
+        borderBottom: "1px solid rgba(226,232,240,0.6)",
         minHeight: "44px"
       }
     });
@@ -3681,8 +3534,8 @@ function DayCard({
     });
   })(), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "var(--onn-section-bg)",
-      borderTop: "1px solid var(--onn-section-border)",
+      background: "#f8fafc",
+      borderTop: "1px solid #e2e8f0",
       padding: "8px 12px",
       flexShrink: 0,
       display: "flex",
@@ -3698,43 +3551,43 @@ function DayCard({
       flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement(Chip, {
-    color: "var(--onn-brand-soft-text)",
-    bg: "var(--onn-brand-soft-bg)",
+    color: "#0369a1",
+    bg: "#e0f2fe",
     label: "CH",
     value: ch
   }), /*#__PURE__*/React.createElement(Chip, {
-    color: "var(--onn-control-text)",
-    bg: "var(--onn-control-bg)",
+    color: "#6d28d9",
+    bg: "#ede9fe",
     label: "LW",
     value: lw
   }), /*#__PURE__*/React.createElement(Chip, {
-    color: "var(--onn-success-text)",
-    bg: "var(--onn-success-bg)",
+    color: "#047857",
+    bg: "#d1fae5",
     label: "WFH",
     value: remote
   }), /*#__PURE__*/React.createElement(Chip, {
-    color: "var(--onn-danger-text)",
-    bg: "var(--onn-danger-bg)",
+    color: "#dc2626",
+    bg: "#fee2e2",
     label: "Out",
     value: vac
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "0.9em",
       fontWeight: 700,
-      color: "var(--onn-text-strong)",
+      color: "#111827",
       textAlign: "center"
     }
   }, working, " working")), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "9px 12px",
-      borderTop: "1px solid var(--onn-section-border)",
+      borderTop: "1px solid #f1f5f9",
       flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "0.65em",
       fontWeight: 700,
-      color: "var(--onn-text-muted)",
+      color: "#64748b",
       letterSpacing: "0.08em",
       textTransform: "uppercase",
       marginBottom: "4px"
@@ -3747,20 +3600,20 @@ function DayCard({
     style: {
       width: "100%",
       resize: "vertical",
-      border: "1.5px solid var(--onn-input-border)",
+      border: lm ? "1.5px solid #cbd5e1" : "1.5px solid #e2e8f0",
       borderRadius: "8px",
       padding: "6px 9px",
       fontSize: "11px",
       fontFamily: "inherit",
-      color: "var(--onn-input-text)",
+      color: "#334155",
       lineHeight: 1.5,
       outline: "none",
-      background: "var(--onn-input-bg)"
+      background: lm ? "#f8fafc" : "#fff"
     }
   }) : /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "11px",
-      color: dayData.notes ? "var(--onn-text)" : "var(--onn-text-soft)",
+      color: dayData.notes ? "#334155" : "#94a3b8",
       fontStyle: dayData.notes ? "normal" : "italic",
       maxHeight: "100px",
       overflowY: "auto",
@@ -4491,8 +4344,8 @@ function MonthBtn({
   onClick
 }) {
   const [hovered, setHovered] = React.useState(false);
-  const bg = isCur ? "var(--onn-brand-strong)" : hovered ? "var(--onn-highlight-bg)" : "var(--onn-control-bg)";
-  const color = isCur ? "#fff" : hovered ? "var(--onn-highlight-text)" : "var(--onn-control-text)";
+  const bg = isCur ? "#6366f1" : hovered ? lightMode ? "#e0e7ff" : "rgba(255,255,255,0.22)" : lightMode ? "#f1f5f9" : "rgba(255,255,255,0.1)";
+  const color = isCur ? "#fff" : hovered ? lightMode ? "#4338ca" : "#fff" : lightMode ? "#374151" : "#e2e8f0";
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     onMouseEnter: () => setHovered(true),
@@ -4519,10 +4372,10 @@ function ScheduleAssistant({
   const isPhone = viewportWidth <= 640;
   const [expanded, setExpanded] = React.useState(false);
   const [activeGuide, setActiveGuide] = React.useState("overview");
-  const bubbleBg = "var(--onn-assistant-bg)";
-  const bubbleBorder = "var(--onn-assistant-border)";
-  const bubbleText = "var(--onn-text-strong)";
-  const bubbleSub = "var(--onn-text-muted)";
+  const bubbleBg = lightMode ? "rgba(255,255,255,0.97)" : "rgba(15,23,42,0.97)";
+  const bubbleBorder = lightMode ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(148,163,184,0.22)";
+  const bubbleText = lightMode ? "#0f172a" : "#f8fafc";
+  const bubbleSub = lightMode ? "#64748b" : "#94a3b8";
   const launcherWidth = isPhone ? "74px" : "84px";
   const launcherHeight = isPhone ? "96px" : "108px";
   const helperTopics = [{
@@ -4607,9 +4460,9 @@ function ScheduleAssistant({
       width: "24px",
       height: "24px",
       borderRadius: "999px",
-      border: "1px solid var(--onn-control-border)",
-      background: "var(--onn-surface)",
-      color: "var(--onn-text-strong)",
+      border: lightMode ? "1px solid rgba(0,0,0,0.1)" : "1px solid rgba(255,255,255,0.16)",
+      background: lightMode ? "rgba(255,255,255,0.98)" : "rgba(15,23,42,0.94)",
+      color: lightMode ? "#64748b" : "#f8fafc",
       boxShadow: "0 8px 18px rgba(15,23,42,0.18)",
       cursor: "pointer",
       pointerEvents: "auto",
@@ -4628,7 +4481,7 @@ function ScheduleAssistant({
       borderRadius: "18px",
       background: bubbleBg,
       border: bubbleBorder,
-      boxShadow: "var(--onn-assistant-shadow)",
+      boxShadow: lightMode ? "0 20px 45px rgba(79,70,229,0.16)" : "0 24px 50px rgba(2,6,23,0.55)",
       color: bubbleText,
       pointerEvents: "auto",
       backdropFilter: "blur(14px)"
@@ -4660,7 +4513,7 @@ function ScheduleAssistant({
       fontWeight: 800,
       letterSpacing: "0.08em",
       textTransform: "uppercase",
-      color: "var(--onn-highlight-text)",
+      color: lightMode ? "#7c3aed" : "#c4b5fd",
       marginBottom: "6px"
     }
   }, activeGuide === "overview" ? "Schedule Sidekick" : activeTopic.icon + " Guide"), /*#__PURE__*/React.createElement("div", {
@@ -4681,8 +4534,8 @@ function ScheduleAssistant({
     title: "Dismiss helper",
     style: {
       border: "none",
-      background: "var(--onn-control-bg)",
-      color: "var(--onn-control-text)",
+      background: lightMode ? "rgba(99,102,241,0.08)" : "rgba(255,255,255,0.08)",
+      color: lightMode ? "#6366f1" : "#cbd5e1",
       width: "28px",
       height: "28px",
       borderRadius: "999px",
@@ -4705,8 +4558,8 @@ function ScheduleAssistant({
       textAlign: "left",
       padding: "10px 12px",
       borderRadius: "12px",
-      border: "1px solid var(--onn-surface-border)",
-      background: "var(--onn-surface-alt)",
+      border: lightMode ? "1px solid rgba(99,102,241,0.14)" : "1px solid rgba(148,163,184,0.18)",
+      background: lightMode ? "#fafaff" : "rgba(30,41,59,0.72)",
       color: bubbleText,
       cursor: "pointer",
       fontFamily: "inherit"
@@ -4731,7 +4584,7 @@ function ScheduleAssistant({
       color: bubbleSub,
       padding: "9px 10px",
       borderRadius: "10px",
-      background: "var(--onn-section-bg)"
+      background: lightMode ? "#f8fafc" : "rgba(51,65,85,0.52)"
     }
   }, "You can hide me anytime in Settings > Preferences.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4752,8 +4605,8 @@ function ScheduleAssistant({
       width: "20px",
       height: "20px",
       borderRadius: "999px",
-      background: "var(--onn-highlight-strong-bg)",
-      color: "var(--onn-highlight-strong-text)",
+      background: lightMode ? "#eef2ff" : "rgba(99,102,241,0.22)",
+      color: lightMode ? "#4338ca" : "#c7d2fe",
       fontSize: "11px",
       fontWeight: 800,
       display: "inline-flex",
@@ -4773,8 +4626,8 @@ function ScheduleAssistant({
       marginTop: "12px",
       padding: "10px 11px",
       borderRadius: "10px",
-      background: "var(--onn-brand-soft-bg)",
-      color: "var(--onn-brand-soft-text)",
+      background: lightMode ? "#eff6ff" : "rgba(30,64,175,0.16)",
+      color: lightMode ? "#1d4ed8" : "#bfdbfe",
       fontSize: "11px",
       lineHeight: 1.45,
       fontWeight: 600
@@ -4793,8 +4646,8 @@ function ScheduleAssistant({
       padding: "8px 11px",
       borderRadius: "10px",
       border: "none",
-      background: "var(--onn-highlight-bg)",
-      color: "var(--onn-highlight-text)",
+      background: lightMode ? "#eef2ff" : "rgba(99,102,241,0.24)",
+      color: lightMode ? "#4338ca" : "#c7d2fe",
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 700,
@@ -4806,7 +4659,7 @@ function ScheduleAssistant({
       padding: "8px 11px",
       borderRadius: "10px",
       border: "none",
-      background: "var(--onn-control-bg)",
+      background: lightMode ? "#f1f5f9" : "rgba(148,163,184,0.14)",
       color: bubbleSub,
       fontFamily: "inherit",
       fontSize: "12px",
@@ -4845,12 +4698,12 @@ function ScheduleAssistant({
       right: isPhone ? "66px" : "76px",
       padding: "4px 8px",
       borderRadius: "999px",
-      background: "var(--onn-surface)",
+      background: lightMode ? "rgba(255,255,255,0.95)" : "rgba(15,23,42,0.95)",
       border: bubbleBorder,
       color: bubbleText,
       fontSize: "10px",
       fontWeight: 700,
-      boxShadow: "var(--onn-shadow)",
+      boxShadow: lightMode ? "0 10px 25px rgba(79,70,229,0.14)" : "0 10px 25px rgba(2,6,23,0.45)",
       whiteSpace: "nowrap",
       zIndex: 8
     }
@@ -4898,7 +4751,7 @@ function ScheduleAssistant({
   }, /*#__PURE__*/React.createElement("path", {
     d: "M78 16c22 0 34 16 34 36v53c0 28-19 46-45 46-24 0-41-16-41-39V58c0-18 12-30 29-30s28 11 28 27v49c0 10-6 17-15 17s-15-7-15-17V67",
     fill: "none",
-    stroke: lightMode ? BRAND.blue : "#9ec8dc",
+    stroke: lightMode ? "#8b80d9" : "#c4b5fd",
     strokeWidth: "10",
     strokeLinecap: "round",
     strokeLinejoin: "round"
@@ -5121,9 +4974,9 @@ const addOnn = () => {
   const inputStyle = {
     padding: "5px 9px",
     borderRadius: "7px",
-    border: "1px solid var(--onn-input-border)",
-    background: "var(--onn-input-bg)",
-    color: "var(--onn-input-text)",
+    border: lm ? "1px solid #e2e8f0" : "1px solid #334155",
+    background: lm ? "#f8fafc" : "#1e293b",
+    color: lm ? "#1e293b" : "#f1f5f9",
     fontSize: "12px",
     fontFamily: "inherit",
     outline: "none",
@@ -5132,7 +4985,7 @@ const addOnn = () => {
   const labelStyle = {
     fontSize: "10px",
     fontWeight: 700,
-    color: "var(--onn-text-muted)",
+    color: lm ? "#475569" : "#94a3b8",
     letterSpacing: "0.06em",
     textTransform: "uppercase",
     marginBottom: "3px",
@@ -5150,12 +5003,12 @@ const addOnn = () => {
     style: {
       borderRadius: "10px",
       overflow: "hidden",
-      border: "1px solid var(--onn-surface-border)"
+      border: lm ? "1px solid #e2e8f0" : "1px solid rgba(255,255,255,0.08)"
     }
   }, editingId === onn.id ? /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "12px",
-      background: "var(--onn-surface-alt)"
+      background: lm ? "#f8fafc" : "#1e293b"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5207,7 +5060,7 @@ const addOnn = () => {
       alignItems: "center",
       gap: "6px",
       cursor: "pointer",
-      color: "var(--onn-text-muted)",
+      color: lm ? "#64748b" : "#94a3b8",
       fontSize: "12px"
     }
   }, /*#__PURE__*/React.createElement("input", {
@@ -5218,7 +5071,7 @@ const addOnn = () => {
       setEditFloat(checked);
     },
     style: {
-      accentColor: BRAND.blue
+      accentColor: "#6366f1"
     }
   }), " Float"), /*#__PURE__*/React.createElement("label", {
     style: {
@@ -5226,7 +5079,7 @@ const addOnn = () => {
       alignItems: "center",
       gap: "6px",
       cursor: "pointer",
-      color: "var(--onn-text-muted)",
+      color: lm ? "#64748b" : "#94a3b8",
       fontSize: "12px"
     }
   }, /*#__PURE__*/React.createElement("input", {
@@ -5256,7 +5109,7 @@ const addOnn = () => {
       setEditingId(null);
     },
     style: {
-      background: "var(--onn-brand-strong)",
+      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
       border: "none",
       color: "#fff",
       padding: "5px 14px",
@@ -5269,7 +5122,7 @@ const addOnn = () => {
   }, "Done")))) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "10px 12px",
-      background: "var(--onn-surface)",
+      background: lm ? "#fff" : "rgba(255,255,255,0.02)",
       display: "flex",
       alignItems: "flex-start",
       justifyContent: "space-between",
@@ -5283,15 +5136,15 @@ const addOnn = () => {
     style: {
       fontWeight: 700,
       fontSize: "13px",
-      color: "var(--onn-text-strong)"
+      color: lm ? "#0f172a" : "#f1f5f9"
     }
   }, onn.name, onn.floater && /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: "6px",
       fontSize: "9px",
       fontWeight: 700,
-      color: "var(--onn-brand-soft-text)",
-      background: "var(--onn-brand-soft-bg)",
+      color: "#0369a1",
+      background: "#e0f2fe",
       padding: "1px 5px",
       borderRadius: "6px"
     }
@@ -5307,16 +5160,16 @@ const addOnn = () => {
     style: {
       fontSize: "10px",
       fontWeight: 600,
-      color: "var(--onn-brand-soft-text)",
-      background: "var(--onn-brand-soft-bg)",
-      border: "1px solid var(--onn-brand-soft-border)",
+      color: lm ? "#1d4ed8" : "#93c5fd",
+      background: lm ? "#eff6ff" : "rgba(59,130,246,0.12)",
+      border: lm ? "1px solid #bfdbfe" : "1px solid rgba(59,130,246,0.2)",
       padding: "1px 7px",
       borderRadius: "5px"
     }
   }, d))), onn.floater && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "10px",
-      color: "var(--onn-text-muted)",
+      color: lm ? "#64748b" : "#94a3b8",
       fontStyle: "italic",
       marginTop: "2px"
     }
@@ -5329,9 +5182,9 @@ const addOnn = () => {
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setDefaultsId(defaultsId === onn.id ? null : onn.id),
     style: {
-      background: "var(--onn-highlight-bg)",
-      border: "1px solid var(--onn-highlight-border)",
-      color: "var(--onn-highlight-text)",
+      background: lm ? "#fef3c7" : "rgba(245,158,11,0.2)",
+      border: "1px solid #fcd34d",
+      color: "#b45309",
       padding: "3px 10px",
       borderRadius: "6px",
       cursor: "pointer",
@@ -5342,9 +5195,9 @@ const addOnn = () => {
   }, "Schedule"), /*#__PURE__*/React.createElement("button", {
     onClick: () => startEdit(onn),
     style: {
-      background: "var(--onn-control-bg)",
-      border: "1px solid var(--onn-control-border)",
-      color: "var(--onn-control-text)",
+      background: lm ? "#eef2ff" : "rgba(99,102,241,0.15)",
+      border: lm ? "1px solid #a5b4fc" : "1px solid rgba(99,102,241,0.3)",
+      color: lm ? "#4338ca" : "#a5b4fc",
       padding: "3px 10px",
       borderRadius: "6px",
       cursor: "pointer",
@@ -5380,9 +5233,9 @@ const addOnn = () => {
   }, "Yes"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setConfirmDeleteId(null),
     style: {
-      background: "var(--onn-control-bg)",
+      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
       border: "none",
-      color: "var(--onn-text-muted)",
+      color: lm ? "#64748b" : "#94a3b8",
       padding: "3px 9px",
       borderRadius: "6px",
       cursor: "pointer",
@@ -5392,9 +5245,9 @@ const addOnn = () => {
   }, "No")) : /*#__PURE__*/React.createElement("button", {
     onClick: () => removeOnn(onn.id),
     style: {
-      background: "var(--onn-danger-bg)",
-      border: "1px solid var(--onn-danger-border)",
-      color: "var(--onn-danger-text)",
+      background: lm ? "#fee2e2" : "rgba(239,68,68,0.1)",
+      border: lm ? "1px solid #fca5a5" : "1px solid rgba(239,68,68,0.25)",
+      color: lm ? "#dc2626" : "#fca5a5",
       padding: "3px 10px",
       borderRadius: "6px",
       cursor: "pointer",
@@ -5404,8 +5257,8 @@ const addOnn = () => {
     }
   }, "Remove"))), defaultsId === onn.id && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "var(--onn-callout-bg)",
-      borderTop: "1px solid var(--onn-callout-border)",
+      background: lm ? "#fffbeb" : "rgba(245,158,11,0.07)",
+      borderTop: `1px solid ${lm ? "#fde68a" : "rgba(245,158,11,0.2)"}`,
       padding: "14px 14px 10px",
       marginTop: "0"
     }
@@ -5413,7 +5266,7 @@ const addOnn = () => {
     style: {
       fontSize: "10px",
       fontWeight: 700,
-      color: "var(--onn-callout-text)",
+      color: "#b45309",
       marginBottom: "8px",
       letterSpacing: "0.05em",
       textTransform: "uppercase"
@@ -5435,11 +5288,11 @@ const addOnn = () => {
         gap: "4px"
       }
     }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: "9px",
-      fontWeight: 700,
-      color: "var(--onn-text-muted)",
-      letterSpacing: "0.07em"
+      style: {
+        fontSize: "9px",
+        fontWeight: 700,
+        color: lm ? "#64748b" : "#94a3b8",
+        letterSpacing: "0.07em"
       }
     }, day.slice(0, 3).toUpperCase()), [STATUS.CH, STATUS.LW, STATUS.REMOTE, STATUS.OFF].map(s => {
       const cfg = STATUS_CONFIG[s];
@@ -5455,15 +5308,15 @@ const addOnn = () => {
           border: active ? `1px solid ${cfg.color}` : "1px solid transparent",
           cursor: "pointer",
           fontFamily: "inherit",
-          background: active ? cfg.bg : "var(--onn-control-bg)",
-          color: active ? cfg.color : "var(--onn-text-soft)"
+          background: active ? cfg.bg : lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
+          color: active ? cfg.color : lm ? "#94a3b8" : "#64748b"
         }
       }, cfg.label);
     }));
   }))))))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "var(--onn-callout-bg)",
-      border: "1px dashed var(--onn-callout-border)",
+      background: lm ? "rgba(99,102,241,0.05)" : "rgba(99,102,241,0.08)",
+      border: "1px dashed rgba(99,102,241,0.3)",
       borderRadius: "10px",
       padding: "12px 14px"
     }
@@ -5471,7 +5324,7 @@ const addOnn = () => {
     style: {
       fontSize: "10px",
       fontWeight: 800,
-      color: "var(--onn-callout-text)",
+      color: lm ? "#4f46e5" : "#818cf8",
       letterSpacing: "0.07em",
       textTransform: "uppercase",
       marginBottom: "10px"
@@ -5514,7 +5367,7 @@ const addOnn = () => {
       alignItems: "center",
       gap: "6px",
       cursor: "pointer",
-      color: "var(--onn-text-muted)",
+      color: lm ? "#374151" : "#94a3b8",
       fontSize: "12px",
       fontWeight: 500
     }
@@ -5523,13 +5376,13 @@ const addOnn = () => {
     checked: newFloat,
     onChange: e => setNewFloat(e.target.checked),
     style: {
-      accentColor: BRAND.blue
+      accentColor: "#6366f1"
     }
   }), " Float"), /*#__PURE__*/React.createElement("button", {
     onClick: addOnn,
     disabled: !newName.trim(),
     style: {
-      background: "var(--onn-brand-strong)",
+      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
       border: "none",
       color: "#fff",
       padding: "6px 18px",
@@ -5554,7 +5407,7 @@ const addOnn = () => {
       padding: "8px 24px",
       borderRadius: "9px",
       border: "none",
-      background: "var(--onn-brand-strong)",
+      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
       color: "#fff",
       fontFamily: "inherit",
       fontSize: "13px",
@@ -5724,8 +5577,8 @@ function SettingsModal({
     padding: isPhone ? "12px" : "24px"
   };
   const boxStyle = {
-    background: "var(--onn-surface)",
-    border: "1px solid var(--onn-surface-border)",
+    background: lm ? "#ffffff" : "#0f172a",
+    border: lm ? "1px solid rgba(0,0,0,0.1)" : "1px solid rgba(255,255,255,0.1)",
     borderRadius: isPhone ? "16px" : "18px",
     width: "100%",
     maxWidth: "720px",
@@ -5743,8 +5596,8 @@ function SettingsModal({
     fontSize: "12px",
     flex: isPhone ? 1 : undefined,
     cursor: "pointer",
-    background: tab === t ? "var(--onn-brand-strong)" : "transparent",
-    color: tab === t ? "#fff" : "var(--onn-text-soft)"
+    background: tab === t ? lm ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
+    color: tab === t ? lm ? "#4338ca" : "#a5b4fc" : lm ? "#64748b" : "#94a3b8"
   });
   const settingRow = {
     display: "flex",
@@ -5753,16 +5606,16 @@ function SettingsModal({
     justifyContent: "space-between",
     gap: isPhone ? "10px" : 0,
     padding: "14px 0",
-    borderBottom: "1px solid var(--onn-surface-border-soft)"
+    borderBottom: `1px solid ${lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)"}`
   };
   const settingLabel = {
     fontSize: "13px",
     fontWeight: 600,
-    color: "var(--onn-text-strong)"
+    color: lm ? "#1e293b" : "#f1f5f9"
   };
   const settingDesc = {
     fontSize: "11px",
-    color: "var(--onn-text-muted)",
+    color: lm ? "#64748b" : "#94a3b8",
     marginTop: "2px"
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -5783,7 +5636,7 @@ function SettingsModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "var(--onn-text-strong)",
+      color: lm ? "#1e293b" : "#f8fafc",
       fontWeight: 800,
       fontSize: "16px"
     }
@@ -5794,14 +5647,14 @@ function SettingsModal({
       border: "none",
       cursor: "pointer",
       fontSize: "18px",
-      color: "var(--onn-text-muted)",
+      color: lm ? "#64748b" : "#94a3b8",
       lineHeight: 1
     }
   }, "✕")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: "4px",
-      background: "var(--onn-control-bg)",
+      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
       borderRadius: "10px",
       padding: "3px",
       width: isPhone ? "100%" : "fit-content"
@@ -5835,7 +5688,7 @@ function SettingsModal({
     style: {
       display: "flex",
       gap: "4px",
-      background: "var(--onn-control-bg)",
+      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.07)",
       borderRadius: "8px",
       padding: "3px"
     }
@@ -5853,8 +5706,8 @@ function SettingsModal({
       fontWeight: 600,
       fontSize: "12px",
       cursor: "pointer",
-      background: prefLightMode === val ? "var(--onn-surface)" : "transparent",
-      color: prefLightMode === val ? "var(--onn-text-strong)" : "var(--onn-text-muted)"
+      background: prefLightMode === val ? lm ? "#fff" : "rgba(255,255,255,0.15)" : "transparent",
+      color: prefLightMode === val ? lm ? "#1e293b" : "#fff" : lm ? "#64748b" : "#94a3b8"
     }
   }, icon, " ", label)))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
@@ -5866,7 +5719,7 @@ function SettingsModal({
     style: {
       display: "flex",
       gap: "4px",
-      background: "var(--onn-control-bg)",
+      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.07)",
       borderRadius: "8px",
       padding: "3px"
     }
@@ -5884,8 +5737,8 @@ function SettingsModal({
       fontWeight: 700,
       fontSize: "12px",
       cursor: "pointer",
-      background: prefTextSize === val ? "var(--onn-surface)" : "transparent",
-      color: prefTextSize === val ? "var(--onn-text-strong)" : "var(--onn-text-muted)"
+      background: prefTextSize === val ? lm ? "#fff" : "rgba(255,255,255,0.15)" : "transparent",
+      color: prefTextSize === val ? lm ? "#1e293b" : "#fff" : lm ? "#64748b" : "#94a3b8"
     }
   }, label)))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
@@ -5908,9 +5761,9 @@ function SettingsModal({
     style: {
       padding: "7px 12px",
       borderRadius: "8px",
-      border: "1px solid var(--onn-input-border)",
-      background: "var(--onn-input-bg)",
-      color: "var(--onn-input-text)",
+      border: lm ? "1px solid #e2e8f0" : "1px solid #334155",
+      background: lm ? "#f8fafc" : "#1e293b",
+      color: lm ? "#1e293b" : "#f1f5f9",
       fontSize: "13px",
       fontFamily: "inherit",
       outline: "none",
@@ -5928,7 +5781,7 @@ function SettingsModal({
     style: {
       display: "flex",
       gap: "4px",
-      background: "var(--onn-control-bg)",
+      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.07)",
       borderRadius: "8px",
       padding: "3px"
     }
@@ -5946,8 +5799,8 @@ function SettingsModal({
       fontWeight: 600,
       fontSize: "12px",
       cursor: "pointer",
-      background: prefAssistantEnabled === val ? "var(--onn-surface)" : "transparent",
-      color: prefAssistantEnabled === val ? "var(--onn-text-strong)" : "var(--onn-text-muted)"
+      background: prefAssistantEnabled === val ? lm ? "#fff" : "rgba(255,255,255,0.15)" : "transparent",
+      color: prefAssistantEnabled === val ? lm ? "#1e293b" : "#fff" : lm ? "#64748b" : "#94a3b8"
     }
   }, label)))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
@@ -5992,9 +5845,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: "1px solid var(--onn-control-border)",
-      background: "var(--onn-control-bg)",
-      color: "var(--onn-control-text)",
+      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
+      background: lm ? "#f8fafc" : "rgba(255,255,255,0.07)",
+      color: lm ? "#374151" : "#e2e8f0",
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -6012,9 +5865,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: "1px solid var(--onn-control-border)",
-      background: "var(--onn-control-bg)",
-      color: "var(--onn-control-text)",
+      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
+      background: lm ? "#f8fafc" : "rgba(255,255,255,0.07)",
+      color: lm ? "#374151" : "#e2e8f0",
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -6032,9 +5885,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: "1px solid var(--onn-control-border)",
-      background: "var(--onn-control-bg)",
-      color: "var(--onn-control-text)",
+      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
+      background: lm ? "#f8fafc" : "rgba(255,255,255,0.07)",
+      color: lm ? "#374151" : "#e2e8f0",
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -6052,9 +5905,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: "1px solid var(--onn-control-border)",
+      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
       background: "transparent",
-      color: "var(--onn-control-text)",
+      color: lm ? "#374151" : "#e2e8f0",
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -6063,7 +5916,7 @@ function SettingsModal({
   }, signingOut ? "Signing out…" : "Sign out") : /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: "11px",
-      color: "var(--onn-text-soft)"
+      color: lm ? "#94a3b8" : "#64748b"
     }
   }, authEnabled ? "Shared password active" : "Open access")), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6108,9 +5961,9 @@ function SettingsModal({
     style: {
       padding: "6px 14px",
       borderRadius: "7px",
-      border: "1px solid var(--onn-control-border)",
+      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
       background: "transparent",
-      color: "var(--onn-text-muted)",
+      color: lm ? "#64748b" : "#94a3b8",
       fontFamily: "inherit",
       fontSize: "12px",
       cursor: "pointer"
@@ -6134,7 +5987,7 @@ function SettingsModal({
       justifyContent: "flex-end",
       marginTop: "16px",
       paddingTop: "16px",
-      borderTop: "1px solid var(--onn-surface-border-soft)"
+      borderTop: `1px solid ${lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)"}`
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => {
@@ -6159,7 +6012,7 @@ function SettingsModal({
       padding: "8px 24px",
       borderRadius: "9px",
       border: "none",
-      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
+      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
       color: "#fff",
       fontFamily: "inherit",
       fontSize: "13px",
@@ -6178,7 +6031,7 @@ function AuthShell({
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      background: "linear-gradient(160deg,#f4f7f8 0%,#ffffff 58%,#fff7eb 100%)",
+      background: "linear-gradient(160deg,#f0f4ff 0%,#faf5ff 55%,#f0fdf4 100%)",
       fontFamily: "'DM Sans','Segoe UI',sans-serif"
     }
   }, children);
@@ -6201,7 +6054,7 @@ function AuthLoadingScreen() {
       fontSize: "14px",
       letterSpacing: "0.12em",
       textTransform: "uppercase",
-      color: BRAND.blue,
+      color: "#6366f1",
       fontWeight: 700,
       marginBottom: "10px"
     }
@@ -6214,7 +6067,7 @@ function AuthLoadingScreen() {
   }, "Checking access"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "14px",
-      color: "var(--onn-text-muted)"
+      color: "#64748b"
     }
   }, "Verifying whether this browser is already signed in.")));
 }
@@ -6242,7 +6095,7 @@ function SharedPasswordGate({
       fontSize: "14px",
       letterSpacing: "0.12em",
       textTransform: "uppercase",
-      color: BRAND.orangeDark,
+      color: "#6366f1",
       fontWeight: 700,
       marginBottom: "10px"
     }
@@ -6257,7 +6110,7 @@ function SharedPasswordGate({
     style: {
       fontSize: "14px",
       lineHeight: 1.6,
-      color: "var(--onn-text-muted)",
+      color: "#64748b",
       marginBottom: "18px"
     }
   }, "This scheduler is limited to staff with the team password. Once you sign in, this browser will stay signed in until you sign out or the session expires."), /*#__PURE__*/React.createElement("form", {
@@ -6276,7 +6129,7 @@ function SharedPasswordGate({
       width: "100%",
       padding: "13px 15px",
       borderRadius: "14px",
-      border: `1px solid ${BRAND.grayBorder}`,
+      border: "1px solid #cbd5e1",
       background: "#fff",
       color: "#0f172a",
       fontFamily: "inherit",
@@ -6303,7 +6156,7 @@ function SharedPasswordGate({
       padding: "13px 18px",
       borderRadius: "14px",
       border: "none",
-      background: `linear-gradient(135deg,${BRAND.blue},${BRAND.blueDark})`,
+      background: "linear-gradient(135deg,#4f46e5,#0f766e)",
       color: "#fff",
       fontFamily: "inherit",
       fontSize: "14px",
@@ -6360,9 +6213,7 @@ function Root() {
         window.removeEventListener("onn-auth-required", handleAuthRequired);
       };
     }
-    authClient.status().then(status => {
-      applyState(status);
-    }).catch(() => {
+    authClient.status().catch(() => {
       if (cancelled) return;
       setAuthState(prev => ({
         ...prev,
@@ -6466,7 +6317,6 @@ function App({
   const isPhone = viewportWidth <= 640;
   const isNarrowLayout = viewportWidth <= 900;
   const pagePad = isPhone ? "14px" : isNarrowLayout ? "18px" : "28px";
-  const isLocalOfflineMode = typeof window !== "undefined" && (window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.endsWith(".local"));
   const weekStart = getWeekStart(weekOffset);
   const weekDates = getWeekDates(weekStart);
   const refreshWeekActivity = React.useCallback(async () => {
@@ -6527,23 +6377,46 @@ function App({
 	const [teamNextId, setTeamNextId] = useState(0);
 
   const todayStr = new Date().toDateString();
-  const T = getThemePalette(lightMode);
+  const T = lightMode ? {
+    pageBg: "linear-gradient(160deg,#f0f4ff 0%,#faf5ff 55%,#f0fdf4 100%)",
+    navBg: "#ffffff",
+    navBorder: "rgba(0,0,0,0.08)",
+    navTitle: "#1e293b",
+    navSub: "#64748b",
+    statsBg: "#ffffff",
+    statsBorder: "rgba(0,0,0,0.06)",
+    tabActive: "rgba(99,102,241,0.12)",
+    tabActiveTxt: "#4f46e5",
+    tabInactive: "rgba(0,0,0,0.04)",
+    tabBorder: "rgba(0,0,0,0.08)",
+    tabTxt: "#64748b",
+    legendBg: "rgba(0,0,0,0.03)",
+    legendBorder: "rgba(0,0,0,0.06)",
+    scrollThumb: "#cbd5e1"
+  } : {
+    pageBg: "linear-gradient(160deg,#0f172a 0%,#1e293b 55%,#0c1a2e 100%)",
+    navBg: "#0f172a",
+    navBorder: "rgba(255,255,255,0.1)",
+    navTitle: "#f8fafc",
+    navSub: "#94a3b8",
+    statsBg: "#0f172a",
+    statsBorder: "rgba(255,255,255,0.07)",
+    tabActive: "rgba(255,255,255,0.12)",
+    tabActiveTxt: "#ffffff",
+    tabInactive: "rgba(255,255,255,0.03)",
+    tabBorder: "rgba(255,255,255,0.08)",
+    tabTxt: "#94a3b8",
+    legendBg: "rgba(255,255,255,0.03)",
+    legendBorder: "rgba(255,255,255,0.07)",
+    scrollThumb: "#334155"
+  };
 
 	useEffect(() => {
-    let cancelled = false;
-    if (isLocalOfflineMode) {
-      const defaultTeam = sortONNs(normalizeTeam(ONNs));
-      const defaultMaxId = defaultTeam.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
-      setTeamList(defaultTeam);
-      setTeamNextId(defaultMaxId + 1);
-      setTeamLoaded(true);
-    }
 	  Promise.all([loadTeam(), loadNextId()]).then(([savedTeam, savedNextId]) => {
-      if (cancelled) return;
 		const team = savedTeam && savedTeam.length > 0
 		  ? sortONNs(normalizeTeam(savedTeam))
 		  : sortONNs(normalizeTeam(ONNs));
-		setTeamList(team);
+		if (savedTeam && savedTeam.length > 0) setTeamList(team);
 		// High-water mark: never let a new ID equal any ID that has ever existed.
 		const maxFromTeam = team.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
 		const hwm = Math.max(
@@ -6553,25 +6426,16 @@ function App({
 		setTeamNextId(hwm);
 		setTeamLoaded(true);
 	  }).catch(err => {
-      if (cancelled) return;
 		if (err?.code !== "auth") {
 		  console.error("ONN Scheduler team load error:", err);
 		}
 		setTeamLoaded(true);
 	  });
-    return () => {
-      cancelled = true;
-    };
-	}, [isLocalOfflineMode]);
+	}, []);
   useEffect(() => {
     if (!teamLoaded) return;
     let cancelled = false;
-    if (isLocalOfflineMode) {
-      setWeekData(syncWeekDataToTeam(buildDefault(teamList), teamList));
-      setLoading(false);
-    } else {
-      setLoading(true);
-    }
+    setLoading(true);
     setEditMode(false);
     setHasUnsaved(false);
     loadWeekWithCarryover(weekStart, teamList).then(async ({
@@ -6600,7 +6464,7 @@ function App({
     return () => {
       cancelled = true;
     };
-  }, [weekOffset, teamList, teamLoaded, isLocalOfflineMode]);
+  }, [weekOffset, teamList, teamLoaded]);
   useEffect(() => {
     if (!teamLoaded) return;
     let cancelled = false;
@@ -6987,63 +6851,8 @@ const handleTeamSave = (newList, newNextId) => {
     nextId: teamNextId
   }), /*#__PURE__*/React.createElement("div", {
     style: {
-      "--onn-page-bg": T.pageBg,
-      "--onn-nav-bg": T.navBg,
-      "--onn-nav-border": T.navBorder,
-      "--onn-surface": T.surface,
-      "--onn-surface-alt": T.surfaceAlt,
-      "--onn-surface-muted": T.surfaceMuted,
-      "--onn-surface-strong": T.surfaceStrong,
-      "--onn-surface-border": T.surfaceBorder,
-      "--onn-surface-border-soft": T.surfaceBorderSoft,
-      "--onn-text-strong": T.textStrong,
-      "--onn-text": T.text,
-      "--onn-text-muted": T.textMuted,
-      "--onn-text-soft": T.textSoft,
-      "--onn-text-inverse": T.textInverse,
-      "--onn-control-bg": T.controlBg,
-      "--onn-control-hover": T.controlHover,
-      "--onn-control-border": T.controlBorder,
-      "--onn-control-text": T.controlText,
-      "--onn-control-text-muted": T.controlTextMuted,
-      "--onn-brand-solid": T.brandSolid,
-      "--onn-brand-strong": T.brandStrong,
-      "--onn-brand-soft-bg": T.brandSoftBg,
-      "--onn-brand-soft-border": T.brandSoftBorder,
-      "--onn-brand-soft-text": T.brandSoftText,
-      "--onn-highlight-bg": T.highlightBg,
-      "--onn-highlight-strong-bg": T.highlightStrongBg,
-      "--onn-highlight-border": T.highlightBorder,
-      "--onn-highlight-text": T.highlightText,
-      "--onn-highlight-strong-text": T.highlightStrongText,
-      "--onn-callout-bg": T.calloutBg,
-      "--onn-callout-border": T.calloutBorder,
-      "--onn-callout-text": T.calloutText,
-      "--onn-danger-bg": T.dangerBg,
-      "--onn-danger-border": T.dangerBorder,
-      "--onn-danger-text": T.dangerText,
-      "--onn-success-bg": T.successBg,
-      "--onn-success-border": T.successBorder,
-      "--onn-success-text": T.successText,
-      "--onn-day-tab-bg": T.dayTabInactiveBg,
-      "--onn-day-tab-border": T.dayTabInactiveBorder,
-      "--onn-day-tab-text": T.dayTabInactiveText,
-      "--onn-day-tab-active-neutral": T.dayTabActiveNeutral,
-      "--onn-row-away-bg": T.rowAwayBg,
-      "--onn-row-zebra": T.rowZebra,
-      "--onn-row-border": T.rowBorder,
-      "--onn-section-bg": T.sectionBg,
-      "--onn-section-border": T.sectionBorder,
-      "--onn-input-bg": T.inputBg,
-      "--onn-input-border": T.inputBorder,
-      "--onn-input-text": T.inputText,
-      "--onn-assistant-bg": T.assistantBubbleBg,
-      "--onn-assistant-border": T.assistantBubbleBorder,
-      "--onn-assistant-shadow": T.assistantShadow,
-      "--onn-shadow": T.shadow,
-      "--onn-shadow-strong": T.shadowStrong,
       minHeight: "100vh",
-      background: "var(--onn-page-bg)",
+      background: T.pageBg,
       fontFamily: "'DM Sans','Segoe UI',sans-serif",
       fontSize: textSize === 2 ? "18px" : textSize === 1 ? "16px" : "14px",
       paddingBottom: isPhone ? "calc(28px + env(safe-area-inset-bottom, 0px))" : "60px",
@@ -7056,7 +6865,7 @@ const handleTeamSave = (newList, newNextId) => {
         ::-webkit-scrollbar { width:5px; height:5px; }
         ::-webkit-scrollbar-track { background:transparent; }
         ::-webkit-scrollbar-thumb { background:${T.scrollThumb}; border-radius:3px; }
-        textarea:focus, select:focus { outline:2px solid var(--onn-brand-solid) !important; }
+        textarea:focus, select:focus { outline:2px solid #6366f1 !important; }
         @keyframes onnBuddyFloat {
           0%, 100% { transform: translateY(0px) rotate(6deg); }
           50% { transform: translateY(-6px) rotate(2deg); }
@@ -7096,7 +6905,7 @@ const handleTeamSave = (newList, newNextId) => {
       width: "34px",
       height: "34px",
       borderRadius: "10px",
-      background: "var(--onn-brand-strong)",
+      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -7120,7 +6929,7 @@ const handleTeamSave = (newList, newNextId) => {
   }, deptName), storageStatusText && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "9px",
-      color: "var(--onn-brand-soft-text)",
+      color: lightMode ? "#10b981" : "#34d399",
       fontWeight: 700,
       letterSpacing: "0.04em",
       marginTop: "1px"
@@ -7151,13 +6960,13 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "var(--onn-text-strong)",
+      color: lightMode ? "#1e293b" : "#f8fafc",
       fontWeight: 700,
       fontSize: textSize === 2 ? "17px" : textSize === 1 ? "15px" : "13px"
     }
   }, weekLabel), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "var(--onn-text-muted)",
+      color: lightMode ? "#64748b" : "#94a3b8",
       fontSize: textSize === 2 ? "13px" : textSize === 1 ? "11px" : "10px"
     }
   }, weekDates[0].getFullYear(), " ", showJump ? "▲" : "▼")), /*#__PURE__*/React.createElement("button", {
@@ -7173,8 +6982,8 @@ const handleTeamSave = (newList, newNextId) => {
       fontSize: "11px",
       fontWeight: 600,
       border: "none",
-      background: weekOffset !== 0 ? "var(--onn-highlight-strong-bg)" : "transparent",
-      color: weekOffset !== 0 ? "var(--onn-highlight-strong-text)" : "transparent",
+      background: weekOffset !== 0 ? lightMode ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
+      color: weekOffset !== 0 ? lightMode ? "#4338ca" : "#a5b4fc" : "transparent",
       cursor: weekOffset !== 0 ? "pointer" : "default",
       pointerEvents: weekOffset !== 0 ? "auto" : "none",
       minWidth: "52px",
@@ -7194,8 +7003,8 @@ const handleTeamSave = (newList, newNextId) => {
       top: "52px",
       left: "50%",
       transform: "translateX(-50%)",
-      background: "var(--onn-surface)",
-      border: "1px solid var(--onn-surface-border)",
+      background: lightMode ? "#ffffff" : "#1e293b",
+      border: lightMode ? "1px solid rgba(0,0,0,0.1)" : "1px solid rgba(255,255,255,0.12)",
       borderRadius: "12px",
       padding: "14px 16px",
       zIndex: 200,
@@ -7270,8 +7079,8 @@ const handleTeamSave = (newList, newNextId) => {
       fontSize: "11px",
       fontWeight: 700,
       color: "#dc2626",
-      background: "var(--onn-danger-bg)",
-      border: "1px solid var(--onn-danger-border)",
+      background: lightMode ? "#fee2e2" : "rgba(239,68,68,0.15)",
+      border: "1px solid rgba(239,68,68,0.4)",
       borderRadius: "6px",
       padding: "3px 8px",
       maxWidth: "300px",
@@ -7308,10 +7117,9 @@ const handleTeamSave = (newList, newNextId) => {
         background: "#dc2626",
         color: "#fff"
       } : saved ? {
-        background: "var(--onn-success-bg)",
-        color: "var(--onn-success-text)"
+        background: "#10b981"
       } : saving ? {
-        background: "var(--onn-brand-solid)"
+        background: "#818cf8"
       } : {}),
       opacity: 1,
       cursor: saving ? "default" : "pointer"
@@ -7343,13 +7151,13 @@ const handleTeamSave = (newList, newNextId) => {
     icon: "👥",
     label: "Team",
     value: countableTeam.length,
-    color: BRAND.gray
+    color: "#94a3b8"
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: isPhone ? "none" : "block",
       width: "1px",
       height: "26px",
-      background: "var(--onn-surface-border-soft)"
+      background: lightMode ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"
     }
   }), [{
     key: STATUS.CH,
@@ -7362,7 +7170,7 @@ const handleTeamSave = (newList, newNextId) => {
     icon: "🏥",
     label: locLabel.lw,
     value: totals.lw,
-    color: BRAND.gray
+    color: "#c4b5fd"
   }, {
     key: STATUS.REMOTE,
     icon: "🏠",
@@ -7390,8 +7198,8 @@ const handleTeamSave = (newList, newNextId) => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        background: active ? "var(--onn-highlight-strong-bg)" : "transparent",
-        border: active ? "1px solid var(--onn-highlight-border)" : "1px solid transparent",
+        background: active ? lightMode ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
+        border: active ? "1px solid rgba(99,102,241,0.4)" : "1px solid transparent",
         borderRadius: "10px",
         padding: "4px 10px",
         cursor: "pointer",
@@ -7404,14 +7212,14 @@ const handleTeamSave = (newList, newNextId) => {
       style: {
         fontSize: "18px",
         fontWeight: 800,
-        color: active ? "var(--onn-highlight-strong-text)" : color,
+        color: active ? lightMode ? "#4338ca" : color : color,
         lineHeight: 1
       }
     }, value), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: "9px",
         fontWeight: 600,
-        color: active ? "var(--onn-highlight-strong-text)" : "var(--onn-text-soft)",
+        color: "#94a3b8",
         letterSpacing: "0.06em",
         textTransform: "uppercase"
       }
@@ -7527,7 +7335,7 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, loading ? /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "var(--onn-text-muted)",
+      color: lightMode ? "#64748b" : "#94a3b8",
       padding: "80px",
       textAlign: "center",
       fontSize: "14px"
@@ -7600,7 +7408,7 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "var(--onn-text-soft)",
+      color: lightMode ? "#94a3b8" : "#94a3b8",
       fontSize: "10px",
       fontWeight: 700,
       letterSpacing: "0.09em",
