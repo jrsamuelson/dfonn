@@ -156,6 +156,7 @@ const STATUS_CONFIG = {
 };
 const isAway = s => STATUS_CONFIG[s]?.away === true;
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+const LOCAL_DRAFT_PREFIX = "onn_scheduler:localdraft_v1:";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -655,6 +656,64 @@ function formatRelativeTime(value) {
   const match = units.find(unit => elapsedMs >= unit.ms) || units[units.length - 1];
   const amount = Math.floor(elapsedMs / match.ms) || 1;
   return `${amount} ${match.label}${amount === 1 ? "" : "s"} ago`;
+}
+
+function localDraftKey(ws) {
+  return `${LOCAL_DRAFT_PREFIX}${ws.toISOString().slice(0, 10)}`;
+}
+
+function loadLocalDraft(ws) {
+  try {
+    if (!(ws instanceof Date) || Number.isNaN(ws.getTime())) return null;
+    const raw = localStorage.getItem(localDraftKey(ws));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.data || typeof parsed.data !== "object") return null;
+    return {
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
+      data: parsed.data
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalDraft(ws, data) {
+  try {
+    if (!(ws instanceof Date) || Number.isNaN(ws.getTime()) || !data || typeof data !== "object") return "";
+    const updatedAt = new Date().toISOString();
+    localStorage.setItem(localDraftKey(ws), JSON.stringify({
+      updatedAt,
+      data
+    }));
+    return updatedAt;
+  } catch (err) {
+    console.error("ONN Scheduler local draft save error:", err);
+    return "";
+  }
+}
+
+function clearLocalDraft(ws) {
+  try {
+    if (!(ws instanceof Date) || Number.isNaN(ws.getTime())) return;
+    localStorage.removeItem(localDraftKey(ws));
+  } catch (err) {
+    console.error("ONN Scheduler local draft clear error:", err);
+  }
+}
+
+function getSaveFailureMessage(err, hasLocalDraft = false) {
+  const draftSuffix = hasLocalDraft ? " This browser kept a recovery draft for this week." : " Please copy your changes before leaving this page.";
+  if (err?.code === "conflict") {
+    return "Another person saved this week first. Reload this week before saving again so you do not overwrite newer changes.";
+  }
+  if (err?.code === "auth") {
+    return `Your shared-password session expired. Enter it again, then save once more.${draftSuffix}`;
+  }
+  if (err?.code === "storage") {
+    return `Shared storage is unavailable right now, so this week could not be saved online.${draftSuffix}`;
+  }
+  return `Save failed, and this week was not stored.${draftSuffix}`;
 }
 
 async function loadWeekLock(ws) {
@@ -1193,10 +1252,15 @@ function getOutlookNameVariants(onn) {
   const configuredAliases = Array.isArray(onn?.aliases) ? onn.aliases : [];
   return Array.from(new Set([onn?.name, ...builtInAliases, ...configuredAliases].map(value => String(value || "").trim()).filter(Boolean)));
 }
+function getOutlookStatusMentions(rawStatus) {
+  const cleaned = String(rawStatus || "").replace(/^[\s\-:/|]+/, "").replace(/[_/|-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return [];
+  return OUTLOOK_STATUS_ALIASES.filter(option => option.mentionPattern.test(cleaned)).map(option => option.status);
+}
 function parseOutlookStatusToken(rawStatus) {
   const cleaned = String(rawStatus || "").replace(/^[\s\-:/|]+/, "").replace(/[_/|-]+/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned) return null;
-  const statusesMentioned = OUTLOOK_STATUS_ALIASES.filter(option => option.mentionPattern.test(cleaned)).map(option => option.status);
+  const statusesMentioned = getOutlookStatusMentions(cleaned);
   if (new Set(statusesMentioned).size > 1) {
     return null;
   }
@@ -1207,8 +1271,38 @@ function parseOutlookStatusToken(rawStatus) {
   }
   return null;
 }
+function trimOutlookSummaryText(value) {
+  return String(value || "").replace(/[\u2012-\u2015]/g, "-").replace(/\s+/g, " ").trim();
+}
+function matchOutlookNameInText(text, nameVariant) {
+  const trimmedVariant = String(nameVariant || "").trim();
+  if (!text || !trimmedVariant) return null;
+  const escaped = escapeRegExp(trimmedVariant).replace(/\s+/g, "\\s+");
+  const pattern = new RegExp(`(^|[^A-Za-z0-9])(${escaped})(?=$|[^A-Za-z0-9])`, "i");
+  const match = text.match(pattern);
+  if (!match) return null;
+  const prefixLength = String(match[1] || "").length;
+  const matchedText = String(match[2] || trimmedVariant);
+  const start = (match.index || 0) + prefixLength;
+  return {
+    start,
+    end: start + matchedText.length,
+    matchedText
+  };
+}
+function parseOutlookStatusFromText(rawText) {
+  const cleaned = trimOutlookSummaryText(rawText).replace(/[()[\]{}]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+  const direct = parseOutlookStatusToken(cleaned);
+  if (direct) return direct;
+  const segments = cleaned.split(/[|,;()]+/).map(segment => segment.trim()).filter(Boolean);
+  const segmentStatuses = Array.from(new Set(segments.map(segment => parseOutlookStatusToken(segment)).filter(Boolean)));
+  if (segmentStatuses.length === 1) return segmentStatuses[0];
+  const mentionedStatuses = Array.from(new Set(getOutlookStatusMentions(cleaned)));
+  return mentionedStatuses.length === 1 ? mentionedStatuses[0] : null;
+}
 function parseOutlookCalendarSummary(summary, teamList) {
-  const cleaned = String(summary || "").replace(/\s+/g, " ").trim();
+  const cleaned = trimOutlookSummaryText(summary);
   if (!cleaned) return null;
   const candidates = [];
   for (const onn of teamList || []) {
@@ -1220,20 +1314,32 @@ function parseOutlookCalendarSummary(summary, teamList) {
     }
   }
   candidates.sort((a, b) => b.nameVariant.length - a.nameVariant.length);
+  const matchesByOnnId = new Map();
   for (const candidate of candidates) {
     if (!candidate.nameVariant) continue;
-    if (cleaned.length <= candidate.nameVariant.length) continue;
-    if (cleaned.slice(0, candidate.nameVariant.length).toLowerCase() !== candidate.nameVariant.toLowerCase()) continue;
-    const rawStatus = cleaned.slice(candidate.nameVariant.length).replace(/^[\s\-:/|]+/, "");
-    const status = parseOutlookStatusToken(rawStatus);
+    const nameMatch = matchOutlookNameInText(cleaned, candidate.nameVariant);
+    if (!nameMatch) continue;
+    const rawStatus = `${cleaned.slice(0, nameMatch.start)} ${cleaned.slice(nameMatch.end)}`.replace(/\s+/g, " ").trim();
+    const status = parseOutlookStatusFromText(rawStatus);
     if (!status) continue;
-    return {
-      onn: candidate.onn,
-      status,
-      rawStatus: rawStatus.trim()
-    };
+    const key = String(candidate.onn?.id);
+    const prev = matchesByOnnId.get(key);
+    if (!prev || candidate.nameVariant.length > prev.nameVariant.length) {
+      matchesByOnnId.set(key, {
+        onn: candidate.onn,
+        status,
+        rawStatus: rawStatus.trim(),
+        nameVariant: candidate.nameVariant
+      });
+    }
   }
-  return null;
+  if (matchesByOnnId.size !== 1) return null;
+  const match = Array.from(matchesByOnnId.values())[0];
+  return {
+    onn: match.onn,
+    status: match.status,
+    rawStatus: match.rawStatus
+  };
 }
 function parseCsvRecords(text) {
   const input = String(text || "").replace(/^\uFEFF/, "");
@@ -1338,8 +1444,8 @@ function isOutlookCsvMidnightTime(timeValue) {
   return !!time && time.hour === 0 && time.minute === 0 && time.second === 0;
 }
 function getOutlookCsvEventDates(record) {
-  const startDateValue = getOutlookCsvValue(record, ["Start Date", "StartDate"]);
-  const endDateValue = getOutlookCsvValue(record, ["End Date", "EndDate"]);
+  const startDateValue = getOutlookCsvValue(record, ["Start Date", "StartDate", "Start"]);
+  const endDateValue = getOutlookCsvValue(record, ["End Date", "EndDate", "End"]);
   const startTimeValue = getOutlookCsvValue(record, ["Start Time", "StartTime"]);
   const endTimeValue = getOutlookCsvValue(record, ["End Time", "EndTime"]);
   const allDay = parseOutlookCsvBoolean(getOutlookCsvValue(record, ["All day event", "AllDayEvent"]));
@@ -1363,22 +1469,41 @@ function getOutlookCsvEventDates(record) {
   }
   return dates;
 }
-async function importOutlookCalendarCsvText(text, teamList) {
+function collectOutlookSkippedEventSample(list, summary, limit = 5) {
+  if (!Array.isArray(list) || list.length >= limit) return;
+  const cleaned = trimOutlookSummaryText(summary);
+  if (!cleaned || list.includes(cleaned)) return;
+  list.push(cleaned);
+}
+function formatOutlookSkippedEventSamples(samples, totalCount = 0, maxShown = 3) {
+  const shown = Array.isArray(samples) ? samples.filter(Boolean).slice(0, maxShown) : [];
+  if (shown.length === 0) return "";
+  const hiddenCount = Math.max(0, Number(totalCount) - shown.length);
+  const rendered = shown.map(sample => `"${sample}"`).join(", ");
+  return hiddenCount > 0 ? `${rendered}, plus ${hiddenCount} more` : rendered;
+}
+async function applyOutlookImportEntries(entries, teamList) {
   if (!Array.isArray(teamList) || teamList.length === 0) {
     throw new Error("Team list is not available for calendar import.");
   }
-  const records = parseCsvRecords(text);
+  const normalizedEntries = Array.isArray(entries) ? entries : [];
   const weeksToSave = new Map();
   const skippedEvents = [];
+  const skippedEventSamples = [];
+  const appliedSlotKeys = new Set();
   let importedEvents = 0;
   let importedDays = 0;
   let weekendDaysSkipped = 0;
-  for (const record of records) {
-    const summary = getOutlookCsvValue(record, ["Subject"]);
+  let duplicateDaysSkipped = 0;
+  for (const entry of normalizedEntries) {
+    const summary = trimOutlookSummaryText(entry?.summary || "");
     const parsed = parseOutlookCalendarSummary(summary, teamList);
-    const dates = getOutlookCsvEventDates(record);
+    const dates = Array.isArray(entry?.dates) ? entry.dates.filter(date => date instanceof Date && !Number.isNaN(date.getTime())) : [];
     if (!parsed || dates.length === 0) {
-      if (summary) skippedEvents.push(summary);
+      if (summary) {
+        skippedEvents.push(summary);
+        collectOutlookSkippedEventSample(skippedEventSamples, summary);
+      }
       continue;
     }
     let appliedThisEvent = false;
@@ -1392,6 +1517,12 @@ async function importOutlookCalendarCsvText(text, teamList) {
       }
       const weekStart = getWeekStartForDate(date);
       const weekKey = skey(weekStart);
+      const slotKey = `${weekKey}|${dayName}|${parsed.onn.id}|${parsed.status}|${returnDate}`;
+      if (appliedSlotKeys.has(slotKey)) {
+        duplicateDaysSkipped += 1;
+        continue;
+      }
+      appliedSlotKeys.add(slotKey);
       let weekData = weeksToSave.get(weekKey);
       if (!weekData) {
         const loaded = await loadWeekWithCarryover(weekStart, teamList);
@@ -1429,87 +1560,29 @@ async function importOutlookCalendarCsvText(text, teamList) {
     await saveWeek(weekStart, weekData);
   }
   return {
-    totalEvents: records.length,
+    totalEvents: normalizedEntries.length,
     importedEvents,
     importedDays,
     weekendDaysSkipped,
+    duplicateDaysSkipped,
     skippedEvents,
+    skippedEventSamples,
     updatedWeeks: Array.from(weeksToSave.keys()).sort()
   };
 }
+async function importOutlookCalendarCsvText(text, teamList) {
+  const records = parseCsvRecords(text);
+  return await applyOutlookImportEntries(records.map(record => ({
+    summary: getOutlookCsvValue(record, ["Subject", "Title"]),
+    dates: getOutlookCsvEventDates(record)
+  })), teamList);
+}
 async function importOutlookCalendarIcsText(text, teamList) {
-  if (!Array.isArray(teamList) || teamList.length === 0) {
-    throw new Error("Team list is not available for calendar import.");
-  }
   const events = parseIcsEvents(text);
-  const weeksToSave = new Map();
-  const skippedEvents = [];
-  let importedEvents = 0;
-  let importedDays = 0;
-  let weekendDaysSkipped = 0;
-  for (const event of events) {
-    const summary = getIcsField(event, "SUMMARY")?.value || "";
-    const parsed = parseOutlookCalendarSummary(summary, teamList);
-    const dates = getIcsEventDates(event);
-    if (!parsed || dates.length === 0) {
-      if (summary) skippedEvents.push(summary);
-      continue;
-    }
-    let appliedThisEvent = false;
-    const lastDate = dates[dates.length - 1];
-    const returnDate = parsed.status === STATUS.VACATION ? toISODateString(new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate() + 1)) : "";
-    for (const date of dates) {
-      const dayName = getDayNameForDate(date);
-      if (!dayName) {
-        weekendDaysSkipped += 1;
-        continue;
-      }
-      const weekStart = getWeekStartForDate(date);
-      const weekKey = skey(weekStart);
-      let weekData = weeksToSave.get(weekKey);
-      if (!weekData) {
-        const loaded = await loadWeekWithCarryover(weekStart, teamList);
-        weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : syncWeekDataToTeam(buildDefault(teamList), teamList);
-        weeksToSave.set(weekKey, weekData);
-      }
-      const dayData = weekData[dayName] || {
-        notes: "",
-        holiday: false,
-        staff: {}
-      };
-      const slot = getSlot(dayData, parsed.onn.id);
-      weekData[dayName] = {
-        ...dayData,
-        staff: {
-          ...(dayData.staff || {}),
-          [parsed.onn.id]: {
-            ...slot,
-            status: parsed.status,
-            cov1: "",
-            cov2: "",
-            docCoverage: isAway(parsed.status) ? slot.docCoverage || {} : {},
-            returnDate: parsed.status === STATUS.VACATION ? returnDate : ""
-          }
-        }
-      };
-      importedDays += 1;
-      appliedThisEvent = true;
-    }
-    if (appliedThisEvent) importedEvents += 1;
-  }
-  for (const [weekKey, weekData] of weeksToSave.entries()) {
-    const weekStart = parseDateAtStartOfDay(weekKey.slice("onn_week5_".length));
-    if (!weekStart) continue;
-    await saveWeek(weekStart, weekData);
-  }
-  return {
-    totalEvents: events.length,
-    importedEvents,
-    importedDays,
-    weekendDaysSkipped,
-    skippedEvents,
-    updatedWeeks: Array.from(weeksToSave.keys()).sort()
-  };
+  return await applyOutlookImportEntries(events.map(event => ({
+    summary: getIcsField(event, "SUMMARY")?.value || "",
+    dates: getIcsEventDates(event)
+  })), teamList);
 }
 async function importOutlookCalendarFileText(file, text, teamList) {
   const fileName = String(file?.name || "").toLowerCase();
@@ -1521,7 +1594,10 @@ async function importOutlookCalendarFileText(file, text, teamList) {
     return await importOutlookCalendarIcsText(trimmedText, teamList);
   }
   const records = parseCsvRecords(trimmedText);
-  if (records.length > 0 && Object.keys(records[0] || {}).some(key => normalizeOutlookCsvColumnName(key) === "subject")) {
+  if (records.length > 0 && Object.keys(records[0] || {}).some(key => {
+    const normalized = normalizeOutlookCsvColumnName(key);
+    return normalized === "subject" || normalized === "title";
+  })) {
     return await importOutlookCalendarCsvText(trimmedText, teamList);
   }
   return await importOutlookCalendarIcsText(trimmedText, teamList);
@@ -1569,6 +1645,189 @@ const TeamCtx = createContext(ONNs);
 const ThemeCtx = createContext(false);
 const useTheme = () => useContext(ThemeCtx);
 const useTeam = () => useContext(TeamCtx);
+
+function getDesignTheme(lm = false) {
+  if (lm) {
+    return {
+      fontFamily: "'Plus Jakarta Sans','DM Sans','Segoe UI',sans-serif",
+      pageBg: "radial-gradient(circle at top left, #f7efe4 0%, #f5f7fb 34%, #edf2f8 100%)",
+      navBg: "rgba(250,248,243,0.88)",
+      navBorder: "rgba(24,37,61,0.10)",
+      navTitle: "#162033",
+      navSub: "#637188",
+      navChrome: "#eef2f6",
+      navChromeBorder: "#ced7e1",
+      navChromeText: "#344256",
+      navPrimaryBg: "#22344d",
+      navPrimaryText: "#f8fafc",
+      navPrimarySoft: "#dfe8f2",
+      navPrimaryAccent: "#4f8cc9",
+      statsBg: "rgba(255,255,255,0.84)",
+      statsBorder: "rgba(24,37,61,0.08)",
+      legendBg: "rgba(255,255,255,0.86)",
+      legendBorder: "rgba(24,37,61,0.10)",
+      panelBg: "#ffffff",
+      panelAlt: "#f4f6f8",
+      panelMuted: "#eef2f6",
+      panelInset: "#f8fafb",
+      panelBorder: "#d8e0e8",
+      panelBorderSoft: "#e8edf2",
+      cardBg: "#ffffff",
+      cardBorder: "#dce4ec",
+      cardShadow: "0 18px 40px rgba(15,23,42,0.08)",
+      cardShadowStrong: "0 24px 56px rgba(20,49,86,0.16)",
+      cardHeader: "#22344d",
+      cardHeaderToday: "#155a94",
+      cardHeaderHoliday: "#7d6d5c",
+      sectionBg: "#f3f6f9",
+      sectionBorder: "#dce4eb",
+      rowBg: "#ffffff",
+      rowAlt: "#f8fafb",
+      rowAway: "#fff5f3",
+      rowBorder: "rgba(192,204,217,0.7)",
+      textStrong: "#162033",
+      textMain: "#223148",
+      textMuted: "#637188",
+      textSoft: "#8a97a8",
+      textInverse: "#f8fafc",
+      accent: "#215d9c",
+      accentStrong: "#153f69",
+      accentSoft: "#e1ebf5",
+      accentBorder: "#bfd0e2",
+      successSoft: "#e7f7ef",
+      successText: "#0f6b4e",
+      successBorder: "#a6d9c1",
+      dangerSoft: "#fdecea",
+      dangerText: "#b42318",
+      dangerBorder: "#f5c4bd",
+      warnSoft: "#fff2de",
+      warnText: "#9a5b10",
+      warnBorder: "#f0c58a",
+      overlay: "rgba(19,30,45,0.35)",
+      chipNeutralBg: "#f2f4f7",
+      chipNeutralText: "#485567",
+      chipNeutralBorder: "#d5dde7",
+      focus: "#3c78b7",
+      todayTabBg: "#1f5fa2",
+      currentMonthBg: "#22344d",
+      currentMonthText: "#ffffff",
+      monthBg: "#f3f6f9",
+      monthHoverBg: "#e6edf5",
+      monthText: "#344256",
+      monthHoverText: "#22344d",
+      floatBg: "#edf5fb",
+      floatBorder: "#c7ddf0",
+      floatText: "#155a94",
+      modalBg: "#ffffff",
+      modalBorder: "rgba(24,37,61,0.10)",
+      modalChrome: "#f4f6f8",
+      modalChromeStrong: "#eef2f6",
+      fieldBg: "#fbfcfd"
+    };
+  }
+  return {
+    fontFamily: "'Plus Jakarta Sans','DM Sans','Segoe UI',sans-serif",
+    pageBg: "radial-gradient(circle at top left, #182335 0%, #111a28 42%, #0b1220 100%)",
+    navBg: "rgba(13,20,32,0.9)",
+    navBorder: "rgba(148,163,184,0.16)",
+    navTitle: "#f3f7fb",
+    navSub: "#a5b4c6",
+    navChrome: "#1a2738",
+    navChromeBorder: "rgba(148,163,184,0.16)",
+    navChromeText: "#dbe4ef",
+    navPrimaryBg: "#8bb8e5",
+    navPrimaryText: "#102033",
+    navPrimarySoft: "rgba(139,184,229,0.16)",
+    navPrimaryAccent: "#8bb8e5",
+    statsBg: "rgba(15,23,35,0.82)",
+    statsBorder: "rgba(148,163,184,0.12)",
+    legendBg: "rgba(16,25,38,0.84)",
+    legendBorder: "rgba(148,163,184,0.15)",
+    panelBg: "#131d2b",
+    panelAlt: "#172233",
+    panelMuted: "#1b283a",
+    panelInset: "#101926",
+    panelBorder: "rgba(148,163,184,0.16)",
+    panelBorderSoft: "rgba(148,163,184,0.10)",
+    cardBg: "#131d2b",
+    cardBorder: "rgba(148,163,184,0.16)",
+    cardShadow: "0 20px 44px rgba(3,8,16,0.34)",
+    cardShadowStrong: "0 26px 60px rgba(2,8,18,0.44)",
+    cardHeader: "#24364d",
+    cardHeaderToday: "#2d5f93",
+    cardHeaderHoliday: "#6b6258",
+    sectionBg: "#162132",
+    sectionBorder: "rgba(148,163,184,0.14)",
+    rowBg: "#131d2b",
+    rowAlt: "#162233",
+    rowAway: "#2b1b1f",
+    rowBorder: "rgba(148,163,184,0.10)",
+    textStrong: "#f3f7fb",
+    textMain: "#e4ebf5",
+    textMuted: "#a5b4c6",
+    textSoft: "#8090a6",
+    textInverse: "#f8fafc",
+    accent: "#8bb8e5",
+    accentStrong: "#d7e8fa",
+    accentSoft: "rgba(139,184,229,0.16)",
+    accentBorder: "rgba(139,184,229,0.30)",
+    successSoft: "rgba(21,128,93,0.18)",
+    successText: "#7de2bf",
+    successBorder: "rgba(125,226,191,0.28)",
+    dangerSoft: "rgba(180,35,24,0.20)",
+    dangerText: "#ffb7ad",
+    dangerBorder: "rgba(255,183,173,0.22)",
+    warnSoft: "rgba(154,91,16,0.22)",
+    warnText: "#ffd08f",
+    warnBorder: "rgba(255,208,143,0.28)",
+    overlay: "rgba(3,8,16,0.66)",
+    chipNeutralBg: "#1b283a",
+    chipNeutralText: "#cfdae8",
+    chipNeutralBorder: "rgba(148,163,184,0.18)",
+    focus: "#8bb8e5",
+    todayTabBg: "#8bb8e5",
+    currentMonthBg: "#8bb8e5",
+    currentMonthText: "#102033",
+    monthBg: "#1a2738",
+    monthHoverBg: "#24354c",
+    monthText: "#dbe4ef",
+    monthHoverText: "#f8fbff",
+    floatBg: "rgba(56,146,220,0.18)",
+    floatBorder: "rgba(114,182,239,0.28)",
+    floatText: "#9dc9f0",
+    modalBg: "#131d2b",
+    modalBorder: "rgba(148,163,184,0.16)",
+    modalChrome: "#182436",
+    modalChromeStrong: "#101926",
+    fieldBg: "#101926"
+  };
+}
+
+function getStatusTone(status, lm = false) {
+  const tones = lm ? {
+    [STATUS.CH]: { bg: "#e7f0f8", border: "#c5d7e8", text: "#155a94" },
+    [STATUS.LW]: { bg: "#f0ebff", border: "#d6c8fb", text: "#6b46c1" },
+    [STATUS.REMOTE]: { bg: "#e3f6f1", border: "#bfe7da", text: "#0f766e" },
+    [STATUS.OFF]: { bg: "#fdecea", border: "#f5c4bd", text: "#b42318" },
+    [STATUS.VACATION]: { bg: "#fff1e2", border: "#f2cf9d", text: "#b25c10" }
+  } : {
+    [STATUS.CH]: { bg: "rgba(48,105,166,0.22)", border: "rgba(125,181,239,0.28)", text: "#a7cdf4" },
+    [STATUS.LW]: { bg: "rgba(107,70,193,0.22)", border: "rgba(190,162,248,0.28)", text: "#d9c8ff" },
+    [STATUS.REMOTE]: { bg: "rgba(15,118,110,0.22)", border: "rgba(114,216,189,0.28)", text: "#98ead2" },
+    [STATUS.OFF]: { bg: "rgba(180,35,24,0.24)", border: "rgba(255,183,173,0.22)", text: "#ffb7ad" },
+    [STATUS.VACATION]: { bg: "rgba(178,92,16,0.24)", border: "rgba(255,208,143,0.24)", text: "#ffd08f" }
+  };
+  return tones[status] || (lm ? {
+    bg: "#f2f4f7",
+    border: "#d5dde7",
+    text: "#485567"
+  } : {
+    bg: "#1b283a",
+    border: "rgba(148,163,184,0.18)",
+    text: "#cfdae8"
+  });
+}
+
 function useViewportWidth() {
   const [viewportWidth, setViewportWidth] = React.useState(() => typeof window === "undefined" ? 1280 : window.innerWidth);
   React.useEffect(() => {
@@ -1582,76 +1841,88 @@ function useViewportWidth() {
 
 // ─── STYLE CONSTANTS ─────────────────────────────────────────────────────────
 
-const NAV_BTN = (lm = false) => ({
-  background: lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)",
-  border: lm ? "1px solid rgba(0,0,0,0.12)" : "1px solid rgba(255,255,255,0.1)",
-  color: lm ? "#374151" : "#cbd5e1",
+const NAV_BTN = (lm = false) => {
+  const t = getDesignTheme(lm);
+  return {
+  background: t.navChrome,
+  border: `1px solid ${t.navChromeBorder}`,
+  color: t.navChromeText,
   width: "30px",
   height: "30px",
-  borderRadius: "8px",
+  borderRadius: "10px",
   cursor: "pointer",
   fontSize: "17px",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  fontFamily: "inherit"
-});
+  fontFamily: "inherit",
+  boxShadow: lm ? "0 4px 14px rgba(15,23,42,0.06)" : "0 6px 16px rgba(3,8,16,0.18)"
+};};
 const PRI_BTN = {
-  background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+  background: "linear-gradient(135deg,#22344d,#1f5fa2)",
   border: "none",
   color: "#fff",
   padding: "7px 15px",
-  borderRadius: "9px",
+  borderRadius: "10px",
   cursor: "pointer",
   fontWeight: 700,
   fontSize: "12px",
   fontFamily: "inherit"
 };
-const SEC_BTN = (lm = false) => ({
-  background: lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
-  border: lm ? "1px solid #e2e8f0" : "1px solid rgba(255,255,255,0.12)",
-  color: lm ? "#374151" : "#cbd5e1",
+const SEC_BTN = (lm = false) => {
+  const t = getDesignTheme(lm);
+  return {
+  background: t.panelAlt,
+  border: `1px solid ${t.panelBorder}`,
+  color: t.textMain,
   padding: "7px 15px",
-  borderRadius: "9px",
+  borderRadius: "10px",
   cursor: "pointer",
   fontWeight: 600,
   fontSize: "12px",
   fontFamily: "inherit"
-});
-const GHOST_BTN = (lm = false) => ({
+};};
+const GHOST_BTN = (lm = false) => {
+  const t = getDesignTheme(lm);
+  return {
   background: "transparent",
-  border: lm ? "1px solid rgba(0,0,0,0.15)" : "1px solid rgba(255,255,255,0.12)",
-  color: lm ? "#475569" : "#94a3b8",
+  border: `1px solid ${t.panelBorder}`,
+  color: t.textMuted,
   padding: "7px 13px",
-  borderRadius: "9px",
+  borderRadius: "10px",
   cursor: "pointer",
   fontWeight: 600,
   fontSize: "12px",
   fontFamily: "inherit"
-});
-const NBTN = (lm = false, active = false) => ({
+};};
+const NBTN = (lm = false, active = false) => {
+  const t = getDesignTheme(lm);
+  return {
   height: "34px",
   padding: "0 14px",
-  borderRadius: "8px",
-  border: "none",
+  borderRadius: "10px",
+  border: active ? "none" : `1px solid ${t.panelBorder}`,
   fontFamily: "inherit",
   fontSize: "12px",
   fontWeight: 600,
   cursor: "pointer",
-  background: active ? "linear-gradient(135deg,#6366f1,#8b5cf6)" : lm ? "#f1f5f9" : "rgba(255,255,255,0.09)",
-  color: active ? "#fff" : lm ? "#374151" : "#cbd5e1",
+  background: active ? `linear-gradient(135deg,${t.navPrimaryBg},${t.accent})` : t.panelAlt,
+  color: active ? t.textInverse : t.textMain,
   display: "flex",
   alignItems: "center",
   gap: "5px",
   whiteSpace: "nowrap",
-  flexShrink: 0
-});
-const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => ({
+  flexShrink: 0,
+  boxShadow: active ? (lm ? "0 10px 24px rgba(21,63,105,0.22)" : "0 12px 26px rgba(0,0,0,0.3)") : "none"
+};};
+const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => {
+  const t = getDesignTheme(lm);
+  return {
   padding: ts === 2 ? "10px 20px" : ts === 1 ? "8px 17px" : "7px 15px",
-  borderRadius: "12px",
-  border: active ? "none" : `1px solid ${lm ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"}`,
-  background: active ? isToday ? "#4f46e5" : lm ? "#e0e7ff" : "#64748b" : lm ? "rgba(0,0,0,0.06)" : "#475569",
-  color: active ? isToday ? "#fff" : lm ? "#3730a3" : "#ffffff" : lm ? "#374151" : "#f1f5f9",
+  borderRadius: "14px",
+  border: active ? "none" : `1px solid ${t.panelBorder}`,
+  background: active ? isToday ? t.todayTabBg : t.panelBg : t.panelAlt,
+  color: active ? isToday ? t.textInverse : t.textStrong : t.textMuted,
   fontWeight: active ? 700 : 500,
   fontSize: ts === 2 ? "15px" : ts === 1 ? "13px" : "12px",
   cursor: "pointer",
@@ -1661,8 +1932,9 @@ const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => ({
   gap: "4px",
   outline: "none",
   boxShadow: "none",
-  transition: "all 0.15s"
-});
+  transition: "all 0.15s",
+  boxShadow: active ? (isToday ? (lm ? "0 12px 28px rgba(21,90,148,0.22)" : "0 12px 30px rgba(48,105,166,0.28)") : (lm ? "0 10px 20px rgba(15,23,42,0.08)" : "0 10px 24px rgba(0,0,0,0.24)")) : "none"
+};};
 const TH = {
   padding: "7px 9px",
   textAlign: "left",
@@ -1683,7 +1955,9 @@ function Badge({
   onChange,
   labelOverride = null
 }) {
+  const lm = useTheme();
   const c = STATUS_CONFIG[status];
+  const tone = getStatusTone(status, lm);
   return /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (!editable) return;
@@ -1697,9 +1971,9 @@ function Badge({
       height: "26px",
       padding: "0 9px",
       borderRadius: "20px",
-      border: "none",
-      background: c.bg,
-      color: c.color,
+      border: `1px solid ${tone.border}`,
+      background: tone.bg,
+      color: tone.text,
       fontWeight: 700,
       fontSize: "11px",
       lineHeight: 1,
@@ -1722,18 +1996,22 @@ function Chip({
   label,
   value
 }) {
+  const lm = useTheme();
+  const t = getDesignTheme(lm);
   return /*#__PURE__*/React.createElement("span", {
     style: {
       display: "inline-flex",
       alignItems: "center",
       gap: "3px",
-      padding: "2px 7px",
-      borderRadius: "12px",
+      padding: "3px 8px",
+      borderRadius: "999px",
       background: bg,
       color,
+      border: `1px solid ${t.panelBorderSoft}`,
       fontSize: "10px",
       fontWeight: 700,
-      whiteSpace: "nowrap"
+      whiteSpace: "nowrap",
+      boxShadow: lm ? "inset 0 1px 0 rgba(255,255,255,0.6)" : "none"
     }
   }, value, " ", /*#__PURE__*/React.createElement("span", {
     style: {
@@ -1748,12 +2026,19 @@ function StatChip({
   color
 }) {
   const lm = useTheme();
+  const t = getDesignTheme(lm);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
-      gap: "1px"
+      gap: "4px",
+      minWidth: "72px",
+      padding: "8px 12px",
+      borderRadius: "16px",
+      background: t.panelBg,
+      border: `1px solid ${t.panelBorderSoft}`,
+      boxShadow: lm ? "0 10px 24px rgba(15,23,42,0.05)" : "0 10px 24px rgba(0,0,0,0.18)"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1763,7 +2048,7 @@ function StatChip({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      width: "16px",
+      width: "18px",
       display: "inline-flex",
       alignItems: "center",
       justifyContent: "center",
@@ -1773,19 +2058,19 @@ function StatChip({
   }, icon), /*#__PURE__*/React.createElement("span", {
     style: {
       color,
-      fontSize: "18px",
+      fontSize: "19px",
       fontWeight: 800,
       lineHeight: 1
     }
   }, value)), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#94a3b8",
+      color: t.textSoft,
       fontSize: "9px",
       fontWeight: 600,
       letterSpacing: "0.06em",
       textTransform: "uppercase",
       lineHeight: 1,
-      marginTop: "2px"
+      marginTop: "1px"
     }
   }, label));
 }
@@ -1799,21 +2084,23 @@ function OnnSelect({
   ONNs,
   placeholder
 }) {
+  const lm = useTheme();
+  const t = getDesignTheme(lm);
   return /*#__PURE__*/React.createElement("select", {
     value: value || "",
     onChange: e => onChange(e.target.value),
     style: {
       width: "100%",
       minWidth: 0,
-      padding: "1px 4px",
-      borderRadius: "4px",
-      border: "1px solid #e2e8f0",
+      padding: "2px 6px",
+      borderRadius: "6px",
+      border: `1px solid ${t.panelBorder}`,
       fontSize: "10px",
       lineHeight: 1.2,
       fontFamily: "inherit",
       cursor: "pointer",
-      background: value ? "#fff7ed" : "#fafafa",
-      color: value ? "#b45309" : "#94a3b8",
+      background: value ? t.warnSoft : t.fieldBg,
+      color: value ? t.warnText : t.textSoft,
       fontWeight: value ? 700 : 400,
       outline: "none"
     }
@@ -2029,6 +2316,7 @@ function IncomingCoverageBadges({
   items
 }) {
   const lm = useTheme();
+  const t = getDesignTheme(lm);
   if (!items || items.length === 0) return null;
   // Group by doctor+fromOnn so same pair shows on one line
   const grouped = [];
@@ -2074,7 +2362,7 @@ function IncomingCoverageBadges({
     }
   }, g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic from" : g.duties.includes("outlook") ? "Outlook from" : "Epic from"), " ", /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#64748b",
+      color: t.textSoft,
       fontWeight: 500
     }
   }, g.fromOnnName))));
@@ -2436,7 +2724,9 @@ function StaffRow({
 }) {
   const ONNs = useTeam();
   const lm = useTheme();
+  const t = getDesignTheme(lm);
   const c = STATUS_CONFIG[slot.status];
+  const statusTone = getStatusTone(slot.status, lm);
   const away = isAway(slot.status) && !onn.floater; // floaters always appear "present"
   const awayCoverageFullyAssigned = away && !onn.floater && (onn.primary || []).length > 0 && (onn.primary || []).every(doc => getDoctorCoverageState(slot, doc, ONNs, coverageTargetIds).fullyAssigned);
   const [expanded, setExpanded] = React.useState(() => isSingle && away && !onn.floater && !awayCoverageFullyAssigned);
@@ -2531,7 +2821,7 @@ function StaffRow({
       width: "9px",
       height: "9px",
       borderRadius: "50%",
-      background: onn.floater ? "#0369a1" : STATUS_CONFIG[slot.status].color,
+      background: onn.floater ? t.floatText : statusTone.text,
       display: "inline-block",
       flexShrink: 0
     },
@@ -2603,9 +2893,9 @@ function StaffRow({
       }
     },
     style: {
-      background: away ? "#fff8f8" : zebra ? "#f7f9fb" : "#ffffff",
+      background: away ? t.rowAway : zebra ? t.rowAlt : t.rowBg,
       padding: density >= 2 ? "6px 12px" : density === 1 ? "4px 8px" : "3px 6px",
-      borderBottom: "1px solid rgba(226,232,240,0.6)",
+      borderBottom: `1px solid ${t.rowBorder}`,
       transition: "background 0.15s",
       flex: density <= 1 ? "1" : undefined,
       display: "flex",
@@ -2637,13 +2927,13 @@ function StaffRow({
       fontSize: density >= 2 ? "0.95em" : "0.82em",
       fontWeight: 800,
       letterSpacing: "-0.01em",
-      color: "#111827",
+      color: t.textStrong,
       whiteSpace: "nowrap",
       overflow: "hidden",
       textOverflow: "ellipsis",
       maxWidth: density >= 3 ? "none" : density === 2 ? "130px" : "80px",
       cursor: showTooltip ? "default" : "inherit",
-      textDecoration: showTooltip ? "underline dotted #cbd5e1" : "none",
+      textDecoration: showTooltip ? `underline dotted ${t.panelBorder}` : "none",
       textUnderlineOffset: "3px"
     }
   }, onn.name), density < 3 && density >= 1 && slot.note && /*#__PURE__*/React.createElement("span", {
@@ -2652,7 +2942,7 @@ function StaffRow({
       width: "7px",
       height: "7px",
       borderRadius: "50%",
-      background: "#f59e0b",
+      background: t.warnText,
       flexShrink: 0,
       display: "inline-block"
     }
@@ -2660,10 +2950,11 @@ function StaffRow({
     style: {
       fontSize: "9px",
       fontWeight: 700,
-      color: "#0369a1",
-      background: "#e0f2fe",
-      padding: "1px 5px",
-      borderRadius: "6px",
+      color: t.floatText,
+      background: t.floatBg,
+      border: `1px solid ${t.floatBorder}`,
+      padding: "1px 6px",
+      borderRadius: "999px",
       flexShrink: 0
     }
   }, "FLOAT"), onn.floater && editable && /*#__PURE__*/React.createElement("button", {
@@ -2674,7 +2965,7 @@ function StaffRow({
     title: "Remove float from this day",
     style: {
       fontSize: "0.7em",
-      color: "#0369a1",
+      color: t.floatText,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2689,7 +2980,7 @@ function StaffRow({
       onClick: () => setExpanded(e => !e),
       style: {
         fontSize: "0.9em",
-        color: "#6366f1",
+        color: t.accent,
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2705,7 +2996,7 @@ function StaffRow({
       onClick: () => setExpanded(e => !e),
       style: {
         fontSize: "0.9em",
-        color: "#6366f1",
+        color: t.accent,
         background: "none",
         border: "none",
         cursor: "pointer",
@@ -2720,7 +3011,7 @@ function StaffRow({
     onClick: () => setExpanded(e => !e),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: t.accent,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2734,7 +3025,7 @@ function StaffRow({
     onClick: () => setExpanded(e => !e),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: t.accent,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2748,7 +3039,7 @@ function StaffRow({
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: t.accent,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2762,7 +3053,7 @@ function StaffRow({
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
-      color: "#6366f1",
+      color: t.accent,
       background: "none",
       border: "none",
       cursor: "pointer",
@@ -2777,7 +3068,7 @@ function StaffRow({
       marginTop: "1px",
       fontSize: "0.76em",
       fontWeight: 500,
-      color: "#475569",
+      color: t.textMuted,
       whiteSpace: "nowrap",
       overflow: "hidden",
       textOverflow: "ellipsis",
@@ -2811,9 +3102,9 @@ function StaffRow({
       alignItems: "center",
       padding: "2px 7px",
       borderRadius: "999px",
-      background: assigned ? "#f1f5f9" : "#fee2e2",
-      color: assigned ? "#64748b" : "#dc2626",
-      border: assigned ? "1px solid #cbd5e1" : "1px solid #fecaca",
+      background: assigned ? t.panelAlt : t.dangerSoft,
+      color: assigned ? t.textMuted : t.dangerText,
+      border: assigned ? `1px solid ${t.panelBorder}` : `1px solid ${t.dangerBorder}`,
       cursor: "grab",
       fontWeight: 700,
       fontSize: density >= 3 ? "0.88em" : "0.92em"
@@ -2823,9 +3114,9 @@ function StaffRow({
     style: {
       marginTop: "5px",
       padding: "8px 9px",
-      borderRadius: "8px",
-      border: "1px dashed #a5b4fc",
-      background: "#eef2ff",
+      borderRadius: "12px",
+      border: `1px dashed ${t.accentBorder}`,
+      background: t.accentSoft,
       display: "flex",
       gap: "8px",
       alignItems: "center",
@@ -2877,11 +3168,11 @@ function StaffRow({
       width: "100%",
       fontSize: "10px",
       fontFamily: "inherit",
-      border: "1px dashed #cbd5e1",
-      borderRadius: "6px",
+      border: `1px dashed ${t.panelBorder}`,
+      borderRadius: "10px",
       padding: "3px 7px",
-      color: "#475569",
-      background: "transparent",
+      color: t.textMuted,
+      background: t.fieldBg,
       outline: "none",
       order: 99
     }
@@ -2889,7 +3180,7 @@ function StaffRow({
     style: {
       marginTop: "3px",
       fontSize: "10px",
-      color: "#64748b",
+      color: t.textSoft,
       fontStyle: "italic",
       order: 99
     }
@@ -2995,6 +3286,8 @@ function FloaterPicker({
   onAdd,
   compact = false
 }) {
+  const lm = useTheme();
+  const t = getDesignTheme(lm);
   const [open, setOpen] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState("");
   const [selectedStatus, setSelectedStatus] = React.useState(STATUS.CH);
@@ -3019,16 +3312,16 @@ function FloaterPicker({
       minWidth: 0,
       alignSelf: "stretch",
       padding: compact ? "10px 14px" : "8px 16px",
-      background: "#f0f9ff",
+      background: t.floatBg,
       border: "none",
-      borderTop: "1px dashed #bae6fd",
+      borderTop: `1px dashed ${t.floatBorder}`,
       cursor: "pointer",
       fontFamily: "inherit",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
       gap: "6px",
-      color: "#0369a1",
+      color: t.floatText,
       fontSize: "10px",
       fontWeight: 700
     }
@@ -3041,7 +3334,7 @@ function FloaterPicker({
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: compact ? "6px 10px" : "8px 12px",
-      background: "#f0f9ff",
+      background: t.floatBg,
       display: "flex",
       gap: compact ? "4px" : "6px",
       alignItems: "center",
@@ -3054,8 +3347,8 @@ function FloaterPicker({
     style: {
       padding: "4px 8px",
       borderRadius: "6px",
-      border: "1px solid #bae6fd",
-      background: "#fff",
+      border: `1px solid ${t.floatBorder}`,
+      background: t.panelBg,
       fontSize: "11px",
       fontFamily: "inherit",
       outline: "none",
@@ -3075,7 +3368,7 @@ function FloaterPicker({
       gap: "3px"
     }
   }, [STATUS.CH, STATUS.LW, STATUS.REMOTE].map(s => {
-    const cfg = STATUS_CONFIG[s];
+    const cfg = getStatusTone(s, lm);
     const active = selectedStatus === s;
     return /*#__PURE__*/React.createElement("button", {
       key: s,
@@ -3085,13 +3378,13 @@ function FloaterPicker({
         fontWeight: 700,
         padding: "3px 7px",
         borderRadius: "5px",
-        border: active ? `1px solid ${cfg.color}` : "1px solid #e2e8f0",
+        border: active ? `1px solid ${cfg.text}` : `1px solid ${t.panelBorder}`,
         cursor: "pointer",
         fontFamily: "inherit",
-        background: active ? cfg.bg : "#fff",
-        color: active ? cfg.color : "#94a3b8"
+        background: active ? cfg.bg : t.panelBg,
+        color: active ? cfg.text : t.textSoft
       }
-    }, cfg.label);
+    }, STATUS_CONFIG[s].label);
   })), /*#__PURE__*/React.createElement("button", {
     onClick: handleAdd,
     disabled: !selectedId,
@@ -3099,8 +3392,8 @@ function FloaterPicker({
       padding: "3px 10px",
       borderRadius: "6px",
       border: "none",
-      background: selectedId ? "#0369a1" : "#e2e8f0",
-      color: selectedId ? "#fff" : "#94a3b8",
+      background: selectedId ? t.navPrimaryBg : t.panelBorder,
+      color: selectedId ? t.textInverse : t.textSoft,
       fontFamily: "inherit",
       fontSize: "11px",
       fontWeight: 700,
@@ -3111,9 +3404,9 @@ function FloaterPicker({
     style: {
       padding: "3px 8px",
       borderRadius: "6px",
-      border: "1px solid #e2e8f0",
+      border: `1px solid ${t.panelBorder}`,
       background: "none",
-      color: "#94a3b8",
+      color: t.textSoft,
       fontFamily: "inherit",
       fontSize: "11px",
       cursor: "pointer"
@@ -3196,6 +3489,7 @@ function DayCard({
   rowExpandValue = false
 }) {
   const lm = useTheme();
+  const t = getDesignTheme(lm);
   const ONNs = useTeam();
   const cardRef = React.useRef(null);
   const [cardW, setCardW] = React.useState(999);
@@ -3326,8 +3620,9 @@ function DayCard({
   return /*#__PURE__*/React.createElement("div", {
     ref: cardRef,
     style: {
-      background: "#fff",
-      borderRadius: "20px",
+      background: t.cardBg,
+      border: `1px solid ${t.cardBorder}`,
+      borderRadius: "24px",
       overflow: "hidden",
       position: "relative",
       width: "100%",
@@ -3338,14 +3633,14 @@ function DayCard({
       // no minHeight — content sizes the card
       display: "flex",
       flexDirection: "column",
-      boxShadow: isToday ? "0 4px 28px rgba(99,102,241,0.25)" : "0 2px 14px rgba(0,0,0,0.08)"
+      boxShadow: isToday ? t.cardShadowStrong : t.cardShadow
     }
   }, /*#__PURE__*/React.createElement("div", {
     onClick: onHeaderClick,
     style: {
-      background: dayData.holiday ? "#78716c" : isToday ? "#4f46e5" : lm ? "#64748b" : "#475569",
-      padding: "12px 14px",
-      color: "#fff",
+      background: dayData.holiday ? t.cardHeaderHoliday : isToday ? t.cardHeaderToday : t.cardHeader,
+      padding: "14px 16px",
+      color: t.textInverse,
       flexShrink: 0,
       cursor: onHeaderClick ? "pointer" : "default",
       userSelect: "none"
@@ -3388,11 +3683,11 @@ function DayCard({
       fontWeight: 700,
       fontFamily: "inherit",
       cursor: "pointer",
-      padding: "2px 8px",
-      borderRadius: "10px",
-      border: "none",
-      background: dayData.holiday ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.1)",
-      color: "#fff"
+      padding: "3px 9px",
+      borderRadius: "999px",
+      border: "1px solid rgba(255,255,255,0.18)",
+      background: dayData.holiday ? "rgba(255,255,255,0.24)" : "rgba(255,255,255,0.1)",
+      color: t.textInverse
     }
   }, dayData.holiday ? "Holiday ✕" : "Holiday")))), dayData.holiday && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3400,8 +3695,8 @@ function DayCard({
       inset: 0,
       top: "62px",
       zIndex: 5,
-      background: "rgba(248,247,245,0.92)",
-      backdropFilter: "blur(2px)",
+      background: lm ? "rgba(246,242,236,0.94)" : "rgba(19,29,43,0.94)",
+      backdropFilter: "blur(6px)",
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
@@ -3417,21 +3712,21 @@ function DayCard({
     style: {
       fontSize: "14px",
       fontWeight: 800,
-      color: "#78716c"
+      color: t.textMain
     }
   }, "Office Closed"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "11px",
-      color: "#a8a29e"
+      color: t.textMuted
     }
   }, "Holiday — no coverage needed")), density >= 2 && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
-      padding: "5px 12px",
-      background: "#f8fafc",
-      borderBottom: "1px solid #e8edf2",
+      padding: "7px 14px",
+      background: t.sectionBg,
+      borderBottom: `1px solid ${t.sectionBorder}`,
       flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement("span", {
@@ -3505,8 +3800,8 @@ function DayCard({
     const zebra = Math.floor(totalRows / 2) % 2 !== 0;
     return /*#__PURE__*/React.createElement("div", {
       style: {
-        background: zebra ? "#f7f9fb" : "#ffffff",
-        borderBottom: "1px solid rgba(226,232,240,0.6)",
+        background: zebra ? t.rowAlt : t.rowBg,
+        borderBottom: `1px solid ${t.rowBorder}`,
         minHeight: "44px"
       }
     });
@@ -3534,9 +3829,9 @@ function DayCard({
     });
   })(), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#f8fafc",
-      borderTop: "1px solid #e2e8f0",
-      padding: "8px 12px",
+      background: t.sectionBg,
+      borderTop: `1px solid ${t.sectionBorder}`,
+      padding: "10px 12px",
       flexShrink: 0,
       display: "flex",
       flexDirection: "column",
@@ -3551,23 +3846,23 @@ function DayCard({
       flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement(Chip, {
-    color: "#0369a1",
-    bg: "#e0f2fe",
+    color: getStatusTone(STATUS.CH, lm).text,
+    bg: getStatusTone(STATUS.CH, lm).bg,
     label: "CH",
     value: ch
   }), /*#__PURE__*/React.createElement(Chip, {
-    color: "#6d28d9",
-    bg: "#ede9fe",
+    color: getStatusTone(STATUS.LW, lm).text,
+    bg: getStatusTone(STATUS.LW, lm).bg,
     label: "LW",
     value: lw
   }), /*#__PURE__*/React.createElement(Chip, {
-    color: "#047857",
-    bg: "#d1fae5",
+    color: getStatusTone(STATUS.REMOTE, lm).text,
+    bg: getStatusTone(STATUS.REMOTE, lm).bg,
     label: "WFH",
     value: remote
   }), /*#__PURE__*/React.createElement(Chip, {
-    color: "#dc2626",
-    bg: "#fee2e2",
+    color: getStatusTone(STATUS.OFF, lm).text,
+    bg: getStatusTone(STATUS.OFF, lm).bg,
     label: "Out",
     value: vac
   })), /*#__PURE__*/React.createElement("div", {
@@ -3579,8 +3874,8 @@ function DayCard({
     }
   }, working, " working")), /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "9px 12px",
-      borderTop: "1px solid #f1f5f9",
+      padding: "10px 12px 12px",
+      borderTop: `1px solid ${t.sectionBorder}`,
       flexShrink: 0
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -3600,20 +3895,20 @@ function DayCard({
     style: {
       width: "100%",
       resize: "vertical",
-      border: lm ? "1.5px solid #cbd5e1" : "1.5px solid #e2e8f0",
-      borderRadius: "8px",
-      padding: "6px 9px",
+      border: `1.5px solid ${t.panelBorder}`,
+      borderRadius: "12px",
+      padding: "8px 10px",
       fontSize: "11px",
       fontFamily: "inherit",
-      color: "#334155",
+      color: t.textMain,
       lineHeight: 1.5,
       outline: "none",
-      background: lm ? "#f8fafc" : "#fff"
+      background: t.fieldBg
     }
   }) : /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "11px",
-      color: dayData.notes ? "#334155" : "#94a3b8",
+      color: dayData.notes ? t.textMain : t.textSoft,
       fontStyle: dayData.notes ? "normal" : "italic",
       maxHeight: "100px",
       overflowY: "auto",
@@ -4344,23 +4639,25 @@ function MonthBtn({
   onClick
 }) {
   const [hovered, setHovered] = React.useState(false);
-  const bg = isCur ? "#6366f1" : hovered ? lightMode ? "#e0e7ff" : "rgba(255,255,255,0.22)" : lightMode ? "#f1f5f9" : "rgba(255,255,255,0.1)";
-  const color = isCur ? "#fff" : hovered ? lightMode ? "#4338ca" : "#fff" : lightMode ? "#374151" : "#e2e8f0";
+  const t = getDesignTheme(lightMode);
+  const bg = isCur ? t.currentMonthBg : hovered ? t.monthHoverBg : t.monthBg;
+  const color = isCur ? t.currentMonthText : hovered ? t.monthHoverText : t.monthText;
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     onMouseEnter: () => setHovered(true),
     onMouseLeave: () => setHovered(false),
     style: {
       padding: "6px 4px",
-      borderRadius: "7px",
+      borderRadius: "10px",
       fontSize: "11px",
       fontWeight: 600,
-      border: "none",
+      border: `1px solid ${isCur ? "transparent" : t.panelBorder}`,
       cursor: "pointer",
       fontFamily: "inherit",
       background: bg,
       color,
-      transition: "background 0.1s"
+      transition: "background 0.1s",
+      boxShadow: isCur ? (lightMode ? "0 10px 22px rgba(15,23,42,0.08)" : "0 12px 22px rgba(0,0,0,0.24)") : "none"
     }
   }, label);
 }
@@ -4402,7 +4699,7 @@ function ScheduleAssistant({
     icon: "📅",
     title: "Import Outlook data",
     summary: "Bring in an Outlook .csv or .ics export.",
-    steps: ["Open Settings, then Preferences.", "Choose Import Outlook file.", "Upload the Outlook export with titles like Alex LW or Nooni Vacation.", "Review the import feedback before closing Settings."]
+    steps: ["Open Settings, then Preferences.", "Choose Import Outlook file.", "Upload the Outlook export with titles like Alex LW, Ann WFH, or Nooni Vacation.", "Review the import feedback before closing Settings."]
   }];
   const activeTopic = helperTopics.find(topic => topic.key === activeGuide) || helperTopics[0];
   const closeHelper = () => {
@@ -5439,6 +5736,7 @@ function SettingsModal({
   nextId
 }) {
   const lm = lightMode;
+  const t = getDesignTheme(lm);
   const viewportWidth = useViewportWidth();
   const isPhone = viewportWidth <= 640;
   const [tab, setTab] = React.useState("team");
@@ -5527,13 +5825,15 @@ function SettingsModal({
         await onIcsImport(result);
       }
       if (result.importedEvents === 0) {
-        setIcsFeedback("No matching ONN events were imported. Check that event titles use the current ONN names plus CH, LW, WFH, Off, or Vacation.");
+        const sampleLabel = result.skippedEventSamples.length > 0 ? ` Examples: ${formatOutlookSkippedEventSamples(result.skippedEventSamples, result.skippedEvents.length)}.` : "";
+        setIcsFeedback(`No matching ONN events were imported. Check that event titles include one current ONN name plus CH, LW, WFH, Off, or Vacation.${sampleLabel}`);
         setIcsFeedbackTone("error");
       } else {
-        const skippedLabel = result.skippedEvents.length > 0 ? ` Skipped ${result.skippedEvents.length} event${result.skippedEvents.length === 1 ? "" : "s"} that did not match the ONN naming format.` : "";
+        const skippedLabel = result.skippedEvents.length > 0 ? ` Skipped ${result.skippedEvents.length} event${result.skippedEvents.length === 1 ? "" : "s"} that did not clearly map to one ONN and one status.${result.skippedEventSamples.length > 0 ? ` Examples: ${formatOutlookSkippedEventSamples(result.skippedEventSamples, result.skippedEvents.length)}.` : ""}` : "";
+        const duplicateLabel = result.duplicateDaysSkipped > 0 ? ` Ignored ${result.duplicateDaysSkipped} duplicate day import${result.duplicateDaysSkipped === 1 ? "" : "s"} already represented in the file.` : "";
         const weekendLabel = result.weekendDaysSkipped > 0 ? ` Ignored ${result.weekendDaysSkipped} weekend day${result.weekendDaysSkipped === 1 ? "" : "s"}.` : "";
-        setIcsFeedback(`Imported ${result.importedEvents} event${result.importedEvents === 1 ? "" : "s"} into ${result.updatedWeeks.length} week${result.updatedWeeks.length === 1 ? "" : "s"} and updated ${result.importedDays} weekday slot${result.importedDays === 1 ? "" : "s"}.${skippedLabel}${weekendLabel}`);
-        setIcsFeedbackTone(result.skippedEvents.length > 0 ? "warn" : "success");
+        setIcsFeedback(`Imported ${result.importedEvents} event${result.importedEvents === 1 ? "" : "s"} into ${result.updatedWeeks.length} week${result.updatedWeeks.length === 1 ? "" : "s"} and updated ${result.importedDays} weekday slot${result.importedDays === 1 ? "" : "s"}.${skippedLabel}${duplicateLabel}${weekendLabel}`);
+        setIcsFeedbackTone(result.skippedEvents.length > 0 || result.duplicateDaysSkipped > 0 ? "warn" : "success");
       }
     } catch (err) {
       setIcsFeedback("Calendar import failed. Make sure the file is a valid Outlook .csv or .ics export.");
@@ -5570,22 +5870,22 @@ function SettingsModal({
     position: "fixed",
     inset: 0,
     zIndex: 300,
-    background: lm ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.7)",
+    background: t.overlay,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     padding: isPhone ? "12px" : "24px"
   };
   const boxStyle = {
-    background: lm ? "#ffffff" : "#0f172a",
-    border: lm ? "1px solid rgba(0,0,0,0.1)" : "1px solid rgba(255,255,255,0.1)",
-    borderRadius: isPhone ? "16px" : "18px",
+    background: t.modalBg,
+    border: `1px solid ${t.modalBorder}`,
+    borderRadius: isPhone ? "20px" : "24px",
     width: "100%",
     maxWidth: "720px",
     height: isPhone ? "92vh" : "82vh",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 24px 60px rgba(0,0,0,0.25)"
+    boxShadow: t.cardShadowStrong
   };
   const tabBtn = t => ({
     padding: isPhone ? "8px 14px" : "8px 20px",
@@ -5596,8 +5896,8 @@ function SettingsModal({
     fontSize: "12px",
     flex: isPhone ? 1 : undefined,
     cursor: "pointer",
-    background: tab === t ? lm ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
-    color: tab === t ? lm ? "#4338ca" : "#a5b4fc" : lm ? "#64748b" : "#94a3b8"
+    background: tab === t ? getDesignTheme(lm).accentSoft : "transparent",
+    color: tab === t ? getDesignTheme(lm).accentStrong : getDesignTheme(lm).textMuted
   });
   const settingRow = {
     display: "flex",
@@ -5606,16 +5906,16 @@ function SettingsModal({
     justifyContent: "space-between",
     gap: isPhone ? "10px" : 0,
     padding: "14px 0",
-    borderBottom: `1px solid ${lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)"}`
+    borderBottom: `1px solid ${t.panelBorderSoft}`
   };
   const settingLabel = {
     fontSize: "13px",
     fontWeight: 600,
-    color: lm ? "#1e293b" : "#f1f5f9"
+    color: t.textStrong
   };
   const settingDesc = {
     fontSize: "11px",
-    color: lm ? "#64748b" : "#94a3b8",
+    color: t.textMuted,
     marginTop: "2px"
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -5636,9 +5936,10 @@ function SettingsModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: lm ? "#1e293b" : "#f8fafc",
+      color: t.textStrong,
       fontWeight: 800,
-      fontSize: "16px"
+      fontSize: "17px",
+      letterSpacing: "-0.02em"
     }
   }, "Settings"), /*#__PURE__*/React.createElement("button", {
     onClick: closeWithoutSavingPrefs,
@@ -5647,15 +5948,15 @@ function SettingsModal({
       border: "none",
       cursor: "pointer",
       fontSize: "18px",
-      color: lm ? "#64748b" : "#94a3b8",
+      color: t.textMuted,
       lineHeight: 1
     }
   }, "✕")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: "4px",
-      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.06)",
-      borderRadius: "10px",
+      background: t.modalChrome,
+      borderRadius: "12px",
       padding: "3px",
       width: isPhone ? "100%" : "fit-content"
     }
@@ -5688,8 +5989,8 @@ function SettingsModal({
     style: {
       display: "flex",
       gap: "4px",
-      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.07)",
-      borderRadius: "8px",
+      background: t.modalChrome,
+      borderRadius: "10px",
       padding: "3px"
     }
   }, [["🌙", "Dark", false], ["☀️", "Light", true]].map(([icon, label, val]) => /*#__PURE__*/React.createElement("button", {
@@ -5706,8 +6007,8 @@ function SettingsModal({
       fontWeight: 600,
       fontSize: "12px",
       cursor: "pointer",
-      background: prefLightMode === val ? lm ? "#fff" : "rgba(255,255,255,0.15)" : "transparent",
-      color: prefLightMode === val ? lm ? "#1e293b" : "#fff" : lm ? "#64748b" : "#94a3b8"
+      background: prefLightMode === val ? t.panelBg : "transparent",
+      color: prefLightMode === val ? t.textStrong : t.textMuted
     }
   }, icon, " ", label)))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
@@ -5719,8 +6020,8 @@ function SettingsModal({
     style: {
       display: "flex",
       gap: "4px",
-      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.07)",
-      borderRadius: "8px",
+      background: t.modalChrome,
+      borderRadius: "10px",
       padding: "3px"
     }
   }, [["Aa", 0], ["Aa+", 1], ["Aa++", 2]].map(([label, val]) => /*#__PURE__*/React.createElement("button", {
@@ -5737,8 +6038,8 @@ function SettingsModal({
       fontWeight: 700,
       fontSize: "12px",
       cursor: "pointer",
-      background: prefTextSize === val ? lm ? "#fff" : "rgba(255,255,255,0.15)" : "transparent",
-      color: prefTextSize === val ? lm ? "#1e293b" : "#fff" : lm ? "#64748b" : "#94a3b8"
+      background: prefTextSize === val ? t.panelBg : "transparent",
+      color: prefTextSize === val ? t.textStrong : t.textMuted
     }
   }, label)))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
@@ -5761,9 +6062,9 @@ function SettingsModal({
     style: {
       padding: "7px 12px",
       borderRadius: "8px",
-      border: lm ? "1px solid #e2e8f0" : "1px solid #334155",
-      background: lm ? "#f8fafc" : "#1e293b",
-      color: lm ? "#1e293b" : "#f1f5f9",
+      border: `1px solid ${t.panelBorder}`,
+      background: t.fieldBg,
+      color: t.textStrong,
       fontSize: "13px",
       fontFamily: "inherit",
       outline: "none",
@@ -5781,8 +6082,8 @@ function SettingsModal({
     style: {
       display: "flex",
       gap: "4px",
-      background: lm ? "#f1f5f9" : "rgba(255,255,255,0.07)",
-      borderRadius: "8px",
+      background: t.modalChrome,
+      borderRadius: "10px",
       padding: "3px"
     }
   }, [[true, "Show"], [false, "Hide"]].map(([val, label]) => /*#__PURE__*/React.createElement("button", {
@@ -5799,8 +6100,8 @@ function SettingsModal({
       fontWeight: 600,
       fontSize: "12px",
       cursor: "pointer",
-      background: prefAssistantEnabled === val ? lm ? "#fff" : "rgba(255,255,255,0.15)" : "transparent",
-      color: prefAssistantEnabled === val ? lm ? "#1e293b" : "#fff" : lm ? "#64748b" : "#94a3b8"
+      background: prefAssistantEnabled === val ? t.panelBg : "transparent",
+      color: prefAssistantEnabled === val ? t.textStrong : t.textMuted
     }
   }, label)))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
@@ -5813,15 +6114,15 @@ function SettingsModal({
     style: settingLabel
   }, "Outlook calendar import"), /*#__PURE__*/React.createElement("div", {
     style: settingDesc
-  }, "Upload an Outlook .csv or .ics export with event titles like \"Alex LW\", \"Ann WFH\", or \"Nooni Vacation\"."), icsFeedback && /*#__PURE__*/React.createElement("div", {
+  }, "Upload an Outlook .csv or .ics export with event titles like Alex LW, Ann WFH, or Nooni Vacation."), icsFeedback && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: "10px",
       fontSize: "11px",
       lineHeight: 1.45,
-      color: icsFeedbackTone === "error" ? "#b91c1c" : icsFeedbackTone === "warn" ? "#92400e" : "#065f46",
-      background: icsFeedbackTone === "error" ? "#fee2e2" : icsFeedbackTone === "warn" ? "#fef3c7" : "#d1fae5",
-      border: `1px solid ${icsFeedbackTone === "error" ? "#fecaca" : icsFeedbackTone === "warn" ? "#fcd34d" : "#6ee7b7"}`,
-      borderRadius: "8px",
+      color: icsFeedbackTone === "error" ? t.dangerText : icsFeedbackTone === "warn" ? t.warnText : t.successText,
+      background: icsFeedbackTone === "error" ? t.dangerSoft : icsFeedbackTone === "warn" ? t.warnSoft : t.successSoft,
+      border: `1px solid ${icsFeedbackTone === "error" ? t.dangerBorder : icsFeedbackTone === "warn" ? t.warnBorder : t.successBorder}`,
+      borderRadius: "12px",
       padding: "8px 10px"
     }
   }, icsFeedback)), /*#__PURE__*/React.createElement("div", {
@@ -5845,9 +6146,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
-      background: lm ? "#f8fafc" : "rgba(255,255,255,0.07)",
-      color: lm ? "#374151" : "#e2e8f0",
+      border: `1px solid ${t.panelBorder}`,
+      background: t.panelAlt,
+      color: t.textMain,
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -5865,9 +6166,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
-      background: lm ? "#f8fafc" : "rgba(255,255,255,0.07)",
-      color: lm ? "#374151" : "#e2e8f0",
+      border: `1px solid ${t.panelBorder}`,
+      background: t.panelAlt,
+      color: t.textMain,
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -5885,9 +6186,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
-      background: lm ? "#f8fafc" : "rgba(255,255,255,0.07)",
-      color: lm ? "#374151" : "#e2e8f0",
+      border: `1px solid ${t.panelBorder}`,
+      background: t.panelAlt,
+      color: t.textMain,
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -5905,9 +6206,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
+      border: `1px solid ${t.panelBorder}`,
       background: "transparent",
-      color: lm ? "#374151" : "#e2e8f0",
+      color: t.textMain,
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -5916,7 +6217,7 @@ function SettingsModal({
   }, signingOut ? "Signing out…" : "Sign out") : /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: "11px",
-      color: lm ? "#94a3b8" : "#64748b"
+      color: t.textSoft
     }
   }, authEnabled ? "Shared password active" : "Open access")), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5927,7 +6228,7 @@ function SettingsModal({
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       ...settingLabel,
-      color: "#dc2626"
+      color: t.dangerText
     }
   }, "Factory reset"), /*#__PURE__*/React.createElement("div", {
     style: settingDesc
@@ -5940,7 +6241,7 @@ function SettingsModal({
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: "12px",
-      color: "#dc2626",
+      color: t.dangerText,
       fontWeight: 600
     }
   }, "Are you sure?"), /*#__PURE__*/React.createElement("button", {
@@ -5949,8 +6250,8 @@ function SettingsModal({
       padding: "6px 14px",
       borderRadius: "7px",
       border: "none",
-      background: "#dc2626",
-      color: "#fff",
+      background: t.dangerText,
+      color: t.textInverse,
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 700,
@@ -5961,9 +6262,9 @@ function SettingsModal({
     style: {
       padding: "6px 14px",
       borderRadius: "7px",
-      border: `1px solid ${lm ? "#e2e8f0" : "rgba(255,255,255,0.1)"}`,
+      border: `1px solid ${t.panelBorder}`,
       background: "transparent",
-      color: lm ? "#64748b" : "#94a3b8",
+      color: t.textMuted,
       fontFamily: "inherit",
       fontSize: "12px",
       cursor: "pointer"
@@ -5973,9 +6274,9 @@ function SettingsModal({
     style: {
       padding: "7px 16px",
       borderRadius: "8px",
-      border: "1px solid rgba(239,68,68,0.3)",
-      background: "rgba(239,68,68,0.08)",
-      color: "#dc2626",
+      border: `1px solid ${t.dangerBorder}`,
+      background: t.dangerSoft,
+      color: t.dangerText,
       fontFamily: "inherit",
       fontSize: "12px",
       fontWeight: 600,
@@ -5987,7 +6288,7 @@ function SettingsModal({
       justifyContent: "flex-end",
       marginTop: "16px",
       paddingTop: "16px",
-      borderTop: `1px solid ${lm ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)"}`
+      borderTop: `1px solid ${t.panelBorderSoft}`
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => {
@@ -6010,10 +6311,10 @@ function SettingsModal({
     },
     style: {
       padding: "8px 24px",
-      borderRadius: "9px",
+      borderRadius: "12px",
       border: "none",
-      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
-      color: "#fff",
+      background: `linear-gradient(135deg,${t.navPrimaryBg},${t.accent})`,
+      color: t.textInverse,
       fontFamily: "inherit",
       fontSize: "13px",
       fontWeight: 700,
@@ -6024,6 +6325,7 @@ function SettingsModal({
 function AuthShell({
   children
 }) {
+  const t = getDesignTheme(true);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
@@ -6031,30 +6333,31 @@ function AuthShell({
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      background: "linear-gradient(160deg,#f0f4ff 0%,#faf5ff 55%,#f0fdf4 100%)",
-      fontFamily: "'DM Sans','Segoe UI',sans-serif"
+      background: t.pageBg,
+      fontFamily: t.fontFamily
     }
   }, children);
 }
 function AuthLoadingScreen() {
+  const t = getDesignTheme(true);
   return /*#__PURE__*/React.createElement(AuthShell, null, /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       maxWidth: "420px",
-      borderRadius: "22px",
+      borderRadius: "24px",
       padding: "28px 24px",
       background: "rgba(255,255,255,0.92)",
-      border: "1px solid rgba(148,163,184,0.25)",
-      boxShadow: "0 24px 60px rgba(15,23,42,0.12)",
+      border: `1px solid ${t.panelBorder}`,
+      boxShadow: t.cardShadowStrong,
       textAlign: "center",
-      color: "#0f172a"
+      color: t.textStrong
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "14px",
       letterSpacing: "0.12em",
       textTransform: "uppercase",
-      color: "#6366f1",
+      color: t.accent,
       fontWeight: 700,
       marginBottom: "10px"
     }
@@ -6067,7 +6370,7 @@ function AuthLoadingScreen() {
   }, "Checking access"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "14px",
-      color: "#64748b"
+      color: t.textMuted
     }
   }, "Verifying whether this browser is already signed in.")));
 }
@@ -6078,24 +6381,25 @@ function SharedPasswordGate({
 }) {
   const viewportWidth = useViewportWidth();
   const isPhone = viewportWidth <= 640;
+  const t = getDesignTheme(true);
   const [password, setPassword] = React.useState("");
   return /*#__PURE__*/React.createElement(AuthShell, null, /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       maxWidth: "460px",
-      borderRadius: isPhone ? "22px" : "26px",
+      borderRadius: isPhone ? "24px" : "28px",
       padding: isPhone ? "24px 18px" : "30px 30px",
       background: "rgba(255,255,255,0.94)",
-      border: "1px solid rgba(148,163,184,0.25)",
-      boxShadow: "0 24px 60px rgba(15,23,42,0.14)",
-      color: "#0f172a"
+      border: `1px solid ${t.panelBorder}`,
+      boxShadow: t.cardShadowStrong,
+      color: t.textStrong
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "14px",
       letterSpacing: "0.12em",
       textTransform: "uppercase",
-      color: "#6366f1",
+      color: t.accent,
       fontWeight: 700,
       marginBottom: "10px"
     }
@@ -6110,7 +6414,7 @@ function SharedPasswordGate({
     style: {
       fontSize: "14px",
       lineHeight: 1.6,
-      color: "#64748b",
+      color: t.textSoft,
       marginBottom: "18px"
     }
   }, "This scheduler is limited to staff with the team password. Once you sign in, this browser will stay signed in until you sign out or the session expires."), /*#__PURE__*/React.createElement("form", {
@@ -6129,9 +6433,9 @@ function SharedPasswordGate({
       width: "100%",
       padding: "13px 15px",
       borderRadius: "14px",
-      border: "1px solid #cbd5e1",
-      background: "#fff",
-      color: "#0f172a",
+      border: `1px solid ${t.panelBorder}`,
+      background: t.fieldBg,
+      color: t.textStrong,
       fontFamily: "inherit",
       fontSize: "15px",
       outline: "none"
@@ -6141,9 +6445,9 @@ function SharedPasswordGate({
       marginTop: "12px",
       padding: "10px 12px",
       borderRadius: "12px",
-      background: "#fee2e2",
-      border: "1px solid #fecaca",
-      color: "#b91c1c",
+      background: t.dangerSoft,
+      border: `1px solid ${t.dangerBorder}`,
+      color: t.dangerText,
       fontSize: "13px",
       lineHeight: 1.5
     }
@@ -6156,8 +6460,8 @@ function SharedPasswordGate({
       padding: "13px 18px",
       borderRadius: "14px",
       border: "none",
-      background: "linear-gradient(135deg,#4f46e5,#0f766e)",
-      color: "#fff",
+      background: `linear-gradient(135deg,${t.navPrimaryBg},${t.accent})`,
+      color: t.textInverse,
       fontFamily: "inherit",
       fontSize: "14px",
       fontWeight: 700,
@@ -6308,6 +6612,7 @@ function App({
   const [assistantEnabled, setAssistantEnabled] = useState(true);
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [draftRecovery, setDraftRecovery] = React.useState(null);
   const [weekActivity, setWeekActivity] = React.useState({
     savedAt: ""
   });
@@ -6326,6 +6631,10 @@ function App({
     });
   }, [weekStart]);
   const confirmDiscardUnsaved = () => window.confirm("You have unsaved schedule edits for this week. Discard them and continue?");
+  const clearCurrentLocalDraft = React.useCallback(() => {
+    clearLocalDraft(weekStart);
+    setDraftRecovery(null);
+  }, [weekStart]);
   const navigateWeek = next => {
     if (editMode && hasUnsaved && !confirmDiscardUnsaved()) return;
     if (editMode) {
@@ -6377,39 +6686,7 @@ function App({
 	const [teamNextId, setTeamNextId] = useState(0);
 
   const todayStr = new Date().toDateString();
-  const T = lightMode ? {
-    pageBg: "linear-gradient(160deg,#f0f4ff 0%,#faf5ff 55%,#f0fdf4 100%)",
-    navBg: "#ffffff",
-    navBorder: "rgba(0,0,0,0.08)",
-    navTitle: "#1e293b",
-    navSub: "#64748b",
-    statsBg: "#ffffff",
-    statsBorder: "rgba(0,0,0,0.06)",
-    tabActive: "rgba(99,102,241,0.12)",
-    tabActiveTxt: "#4f46e5",
-    tabInactive: "rgba(0,0,0,0.04)",
-    tabBorder: "rgba(0,0,0,0.08)",
-    tabTxt: "#64748b",
-    legendBg: "rgba(0,0,0,0.03)",
-    legendBorder: "rgba(0,0,0,0.06)",
-    scrollThumb: "#cbd5e1"
-  } : {
-    pageBg: "linear-gradient(160deg,#0f172a 0%,#1e293b 55%,#0c1a2e 100%)",
-    navBg: "#0f172a",
-    navBorder: "rgba(255,255,255,0.1)",
-    navTitle: "#f8fafc",
-    navSub: "#94a3b8",
-    statsBg: "#0f172a",
-    statsBorder: "rgba(255,255,255,0.07)",
-    tabActive: "rgba(255,255,255,0.12)",
-    tabActiveTxt: "#ffffff",
-    tabInactive: "rgba(255,255,255,0.03)",
-    tabBorder: "rgba(255,255,255,0.08)",
-    tabTxt: "#94a3b8",
-    legendBg: "rgba(255,255,255,0.03)",
-    legendBorder: "rgba(255,255,255,0.07)",
-    scrollThumb: "#334155"
-  };
+  const T = getDesignTheme(lightMode);
 
 	useEffect(() => {
 	  Promise.all([loadTeam(), loadNextId()]).then(([savedTeam, savedNextId]) => {
@@ -6438,6 +6715,7 @@ function App({
     setLoading(true);
     setEditMode(false);
     setHasUnsaved(false);
+    setDraftRecovery(loadLocalDraft(weekStart));
     loadWeekWithCarryover(weekStart, teamList).then(async ({
       data,
       existed
@@ -6453,6 +6731,7 @@ function App({
         isDirty.current = false;
         setHasUnsaved(false);
       }
+      if (!cancelled) setDraftRecovery(loadLocalDraft(weekStart));
       if (!cancelled) setLoading(false);
     }).catch(err => {
       if (cancelled) return;
@@ -6520,6 +6799,20 @@ function App({
     };
   }, [editMode, weekStart, refreshWeekActivity]);
   useEffect(() => {
+    if (!teamLoaded || loading || !editMode || !hasUnsaved) return;
+    const timer = window.setTimeout(() => {
+      const nextDraft = syncWeekDataToTeam(weekData, teamList);
+      const updatedAt = saveLocalDraft(weekStart, nextDraft);
+      if (updatedAt) {
+        setDraftRecovery({
+          updatedAt,
+          data: nextDraft
+        });
+      }
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [teamLoaded, loading, editMode, hasUnsaved, weekData, teamList, weekStart]);
+  useEffect(() => {
     const warnOnUnload = e => {
       if (!editMode || !hasUnsaved) return;
       e.preventDefault();
@@ -6570,11 +6863,12 @@ function App({
     }
     setSaving(true);
     setSaveError(null);
+    const nextWeekData = syncWeekDataToTeam(weekData, teamList);
+    setWeekData(nextWeekData);
     try {
       await tryAcquireEditLock(weekStart, editSessionIdRef.current);
-      const nextWeekData = syncWeekDataToTeam(weekData, teamList);
-      setWeekData(nextWeekData);
       await saveWeek(weekStart, nextWeekData);
+      clearCurrentLocalDraft();
       await releaseEditLock(weekStart, editSessionIdRef.current);
       await refreshWeekActivity();
       isDirty.current = false;
@@ -6585,7 +6879,14 @@ function App({
       setEditMode(false);
     } catch (err) {
       setSaving(false);
-      setSaveError(err && err.code === "conflict" ? "Another person saved this week first. Reload this week before saving again so you do not overwrite newer changes." : "Save failed — your changes were NOT stored. Please try again or copy your data before leaving this page.");
+      const updatedAt = saveLocalDraft(weekStart, nextWeekData);
+      if (updatedAt) {
+        setDraftRecovery({
+          updatedAt,
+          data: nextWeekData
+        });
+      }
+      setSaveError(getSaveFailureMessage(err, !!updatedAt));
       console.error("ONN Scheduler save error:", err);
     }
   };
@@ -6818,6 +7119,19 @@ const handleTeamSave = (newList, newNextId) => {
     setSaved(false);
     setHasUnsaved(false);
     isDirty.current = false;
+    setDraftRecovery(loadLocalDraft(weekStart));
+  };
+  const handleRestoreDraft = async () => {
+    const localDraft = draftRecovery?.data ? draftRecovery : loadLocalDraft(weekStart);
+    if (!localDraft?.data) return;
+    setSaveError(null);
+    await beginEditMode();
+    const restored = syncWeekDataToTeam(localDraft.data, teamList);
+    setWeekData(restored);
+    setDraftRecovery(localDraft);
+    setHasUnsaved(true);
+    setSaved(false);
+    isDirty.current = true;
   };
   return /*#__PURE__*/React.createElement(ThemeCtx.Provider, {
     value: lightMode
@@ -6853,19 +7167,19 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       minHeight: "100vh",
       background: T.pageBg,
-      fontFamily: "'DM Sans','Segoe UI',sans-serif",
+      fontFamily: T.fontFamily,
       fontSize: textSize === 2 ? "18px" : textSize === 1 ? "16px" : "14px",
       paddingBottom: isPhone ? "calc(28px + env(safe-area-inset-bottom, 0px))" : "60px",
       position: "relative"
     }
   }, /*#__PURE__*/React.createElement("style", null, `
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         html, body, #root { max-width:100%; overflow-x:hidden; }
         * { box-sizing:border-box; }
         ::-webkit-scrollbar { width:5px; height:5px; }
         ::-webkit-scrollbar-track { background:transparent; }
-        ::-webkit-scrollbar-thumb { background:${T.scrollThumb}; border-radius:3px; }
-        textarea:focus, select:focus { outline:2px solid #6366f1 !important; }
+        ::-webkit-scrollbar-thumb { background:${T.textSoft}; border-radius:3px; }
+        textarea:focus, select:focus, input:focus { outline:2px solid ${T.focus} !important; outline-offset: 1px; }
         @keyframes onnBuddyFloat {
           0%, 100% { transform: translateY(0px) rotate(6deg); }
           50% { transform: translateY(-6px) rotate(2deg); }
@@ -6877,7 +7191,8 @@ const handleTeamSave = (newList, newNextId) => {
       padding: isPhone ? "8px 14px 10px" : `0 ${pagePad}`,
       position: "sticky",
       top: 0,
-      zIndex: editMode ? 60 : 50
+      zIndex: editMode ? 60 : 50,
+      backdropFilter: "blur(18px)"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6905,14 +7220,16 @@ const handleTeamSave = (newList, newNextId) => {
       width: "34px",
       height: "34px",
       borderRadius: "10px",
-      background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+      background: `linear-gradient(135deg,${T.navPrimaryBg},${T.accent})`,
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
       fontSize: "17px",
       border: "none",
       cursor: "pointer",
-      flexShrink: 0
+      flexShrink: 0,
+      color: T.navPrimaryText,
+      boxShadow: lightMode ? "0 12px 28px rgba(20,49,86,0.16)" : "0 12px 28px rgba(0,0,0,0.28)"
     }
   }, lightMode ? "🌙" : "☀️"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6929,7 +7246,7 @@ const handleTeamSave = (newList, newNextId) => {
   }, deptName), storageStatusText && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: "9px",
-      color: lightMode ? "#10b981" : "#34d399",
+      color: T.successText,
       fontWeight: 700,
       letterSpacing: "0.04em",
       marginTop: "1px"
@@ -6960,13 +7277,13 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: lightMode ? "#1e293b" : "#f8fafc",
+      color: T.textStrong,
       fontWeight: 700,
       fontSize: textSize === 2 ? "17px" : textSize === 1 ? "15px" : "13px"
     }
   }, weekLabel), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: lightMode ? "#64748b" : "#94a3b8",
+      color: T.textMuted,
       fontSize: textSize === 2 ? "13px" : textSize === 1 ? "11px" : "10px"
     }
   }, weekDates[0].getFullYear(), " ", showJump ? "▲" : "▼")), /*#__PURE__*/React.createElement("button", {
@@ -6977,13 +7294,13 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       height: "30px",
       padding: "0 12px",
-      borderRadius: "8px",
+      borderRadius: "10px",
       fontFamily: "inherit",
       fontSize: "11px",
       fontWeight: 600,
-      border: "none",
-      background: weekOffset !== 0 ? lightMode ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
-      color: weekOffset !== 0 ? lightMode ? "#4338ca" : "#a5b4fc" : "transparent",
+      border: weekOffset !== 0 ? `1px solid ${T.accentBorder}` : "none",
+      background: weekOffset !== 0 ? T.accentSoft : "transparent",
+      color: weekOffset !== 0 ? T.accentStrong : "transparent",
       cursor: weekOffset !== 0 ? "pointer" : "default",
       pointerEvents: weekOffset !== 0 ? "auto" : "none",
       minWidth: "52px",
@@ -7003,12 +7320,12 @@ const handleTeamSave = (newList, newNextId) => {
       top: "52px",
       left: "50%",
       transform: "translateX(-50%)",
-      background: lightMode ? "#ffffff" : "#1e293b",
-      border: lightMode ? "1px solid rgba(0,0,0,0.1)" : "1px solid rgba(255,255,255,0.12)",
-      borderRadius: "12px",
+      background: T.modalBg,
+      border: `1px solid ${T.modalBorder}`,
+      borderRadius: "16px",
       padding: "14px 16px",
       zIndex: 200,
-      boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
+      boxShadow: T.cardShadowStrong,
       minWidth: isPhone ? "220px" : "260px",
       maxWidth: isPhone ? "calc(100vw - 32px)" : "none"
     }
@@ -7078,16 +7395,27 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       fontSize: "11px",
       fontWeight: 700,
-      color: "#dc2626",
-      background: lightMode ? "#fee2e2" : "rgba(239,68,68,0.15)",
-      border: "1px solid rgba(239,68,68,0.4)",
-      borderRadius: "6px",
+      color: T.dangerText,
+      background: T.dangerSoft,
+      border: `1px solid ${T.dangerBorder}`,
+      borderRadius: "10px",
       padding: "3px 8px",
       maxWidth: "300px",
       whiteSpace: "normal",
       lineHeight: 1.3
     }
-  }, saveError), /*#__PURE__*/React.createElement("button", {
+  }, saveError), hasUnsaved && draftRecovery?.updatedAt && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: "11px",
+      fontWeight: 700,
+      color: T.successText,
+      background: T.successSoft,
+      border: `1px solid ${T.successBorder}`,
+      borderRadius: "10px",
+      padding: "3px 8px",
+      lineHeight: 1.3
+    }
+  }, "Local draft saved ", formatRelativeTime(draftRecovery.updatedAt)), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (hasUnsaved && !confirmDiscardUnsaved()) return;
       void releaseEditLock(weekStart, editSessionIdRef.current).then(() => refreshWeekActivity()).catch(err => {
@@ -7114,12 +7442,12 @@ const handleTeamSave = (newList, newNextId) => {
     style: {
       ...NBTN(lightMode, true),
       ...(hasUnsaved && !saving && !saved ? {
-        background: "#dc2626",
-        color: "#fff"
+        background: T.dangerText,
+        color: T.textInverse
       } : saved ? {
-        background: "#10b981"
+        background: T.successText
       } : saving ? {
-        background: "#818cf8"
+        background: T.accent
       } : {}),
       opacity: 1,
       cursor: saving ? "default" : "pointer"
@@ -7151,13 +7479,13 @@ const handleTeamSave = (newList, newNextId) => {
     icon: "👥",
     label: "Team",
     value: countableTeam.length,
-    color: "#94a3b8"
+    color: T.textSoft
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: isPhone ? "none" : "block",
       width: "1px",
       height: "26px",
-      background: lightMode ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"
+      background: T.panelBorder
     }
   }), [{
     key: STATUS.CH,
@@ -7198,28 +7526,29 @@ const handleTeamSave = (newList, newNextId) => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        background: active ? lightMode ? "#e0e7ff" : "rgba(99,102,241,0.2)" : "transparent",
-        border: active ? "1px solid rgba(99,102,241,0.4)" : "1px solid transparent",
-        borderRadius: "10px",
-        padding: "4px 10px",
+        background: active ? T.accentSoft : "transparent",
+        border: active ? `1px solid ${T.accentBorder}` : "1px solid transparent",
+        borderRadius: "14px",
+        padding: "6px 12px",
         cursor: "pointer",
         fontFamily: "inherit",
-        gap: "1px",
-        transition: "all 0.15s"
+        gap: "3px",
+        transition: "all 0.15s",
+        boxShadow: active ? (lightMode ? "0 10px 20px rgba(15,23,42,0.06)" : "0 10px 22px rgba(0,0,0,0.18)") : "none"
       },
       title: active ? "Clear filter" : `Filter to ${label}`
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: "18px",
         fontWeight: 800,
-        color: active ? lightMode ? "#4338ca" : color : color,
+        color: active ? T.accentStrong : color,
         lineHeight: 1
       }
     }, value), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: "9px",
         fontWeight: 600,
-        color: "#94a3b8",
+        color: T.textSoft,
         letterSpacing: "0.06em",
         textTransform: "uppercase"
       }
@@ -7237,16 +7566,16 @@ const handleTeamSave = (newList, newNextId) => {
     onClick: handleClearScope,
     style: {
       ...NBTN(lightMode),
-      color: "#dc2626",
-      background: lightMode ? "#fee2e2" : "rgba(239,68,68,0.15)",
-      border: "1px solid rgba(239,68,68,0.3)"
+      color: T.dangerText,
+      background: T.dangerSoft,
+      border: `1px solid ${T.dangerBorder}`
     }
   }, activeDay ? "Confirm clear day" : "Confirm clear week")), editMode && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowClearConfirm(c => !c),
     style: {
       ...NBTN(lightMode),
-      color: showClearConfirm ? "#dc2626" : undefined,
-      background: showClearConfirm ? lightMode ? "#fee2e2" : "rgba(239,68,68,0.15)" : undefined
+      color: showClearConfirm ? T.dangerText : undefined,
+      background: showClearConfirm ? T.dangerSoft : undefined
     },
     title: activeDay ? "Clear all schedule entries for this day" : "Clear all schedule entries for this week"
   }, activeDay ? "Clear day" : "Clear week")))), /*#__PURE__*/React.createElement("div", {
@@ -7333,7 +7662,43 @@ const handleTeamSave = (newList, newNextId) => {
       maxWidth: "1700px",
       margin: "0 auto"
     }
-  }, loading ? /*#__PURE__*/React.createElement("div", {
+  }, draftRecovery?.updatedAt && !editMode && !hasUnsaved && !loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: "12px",
+      padding: isPhone ? "12px 14px" : "12px 16px",
+      borderRadius: "14px",
+      background: lightMode ? "#eff6ff" : "rgba(30,64,175,0.18)",
+      border: `1px solid ${lightMode ? "#bfdbfe" : "rgba(147,197,253,0.22)"}`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: "10px",
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "12px",
+      lineHeight: 1.45,
+      color: lightMode ? "#1d4ed8" : "#bfdbfe",
+      fontWeight: 600
+    }
+  }, "Local recovery draft available from ", formatRelativeTime(draftRecovery.updatedAt), ". Restore it to recover unsaved edits from this browser."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: "8px",
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: handleRestoreDraft,
+    style: {
+      ...NBTN(lightMode, true),
+      background: lightMode ? "#2563eb" : "#1d4ed8",
+      color: "#fff"
+    }
+  }, "Restore draft"), /*#__PURE__*/React.createElement("button", {
+    onClick: clearCurrentLocalDraft,
+    style: NBTN(lightMode)
+  }, "Discard draft"))), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
       color: lightMode ? "#64748b" : "#94a3b8",
       padding: "80px",
