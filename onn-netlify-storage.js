@@ -4,6 +4,9 @@
   const STORAGE_ENDPOINT = "/.netlify/functions/onn-storage";
   const WEEK_KEY_RE = /^onn_week5_\d{4}-\d{2}-\d{2}$/;
   const WEEK_LOCK_KEY_RE = /^onn_week5_lock_\d{4}-\d{2}-\d{2}$/;
+  const AUTH_REQUEST_TIMEOUT_MS = 5000;
+  const STORAGE_REQUEST_TIMEOUT_MS = 8000;
+  const AUTH_STATUS_RETRY_COUNT = 2;
 
   function createLocalStorageBackend(namespace) {
     const keyFor = (key) => `${namespace}${key}`;
@@ -104,6 +107,29 @@
     return error;
   }
 
+  async function fetchWithTimeout(url, init, timeoutMs) {
+    if (typeof AbortController !== "function" || !(timeoutMs > 0)) {
+      return fetch(url, init);
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw makeError("The request timed out.", "timeout");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
   function emitAuthState(detail) {
     window.dispatchEvent(new CustomEvent("onn-auth-state", { detail }));
   }
@@ -148,15 +174,33 @@
         };
       }
 
-      return fetch(withQuery({ action }, AUTH_ENDPOINT), {
-        ...init,
-        cache: "no-store",
-        credentials: "same-origin",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          ...(init && init.headers ? init.headers : {}),
-        },
-      });
+      try {
+        return await fetchWithTimeout(withQuery({ action }, AUTH_ENDPOINT), {
+          ...init,
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            ...(init && init.headers ? init.headers : {}),
+          },
+        }, AUTH_REQUEST_TIMEOUT_MS);
+      } catch (error) {
+        if (error?.code === "timeout") {
+          throw makeError(
+            "The ONN access check timed out. Please try again.",
+            "network",
+          );
+        }
+
+        if (error?.code) {
+          throw error;
+        }
+
+        throw makeError(
+          "The ONN access service could not be reached. Please try again.",
+          "network",
+        );
+      }
     }
 
     async function parseStatusResponse(response) {
@@ -171,18 +215,28 @@
 
     return {
       async status() {
-        const response = await request("status", { method: "GET", headers: {} });
+        let lastError = null;
 
-        if (response.headers.get("x-onn-auth") !== "1") {
-          const fallback = {
-            enabled: false,
-            authenticated: true,
-          };
-          emitAuthState(fallback);
-          return fallback;
+        for (let attempt = 0; attempt < AUTH_STATUS_RETRY_COUNT; attempt += 1) {
+          try {
+            const response = await request("status", { method: "GET", headers: {} });
+
+            if (response.headers.get("x-onn-auth") !== "1") {
+              const fallback = {
+                enabled: false,
+                authenticated: true,
+              };
+              emitAuthState(fallback);
+              return fallback;
+            }
+
+            return parseStatusResponse(response);
+          } catch (error) {
+            lastError = error;
+          }
         }
 
-        return parseStatusResponse(response);
+        throw lastError || makeError("The ONN access service could not be reached.", "network");
       },
 
       async login(password) {
@@ -225,11 +279,11 @@
 
     async function request(url, init) {
       try {
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
           ...init,
           cache: "no-store",
           credentials: "same-origin",
-        });
+        }, STORAGE_REQUEST_TIMEOUT_MS);
 
         if (response.headers.get("x-onn-storage") !== "1") {
           if (canFallbackToLocal && (mode === "unknown" || mode === "local")) {
@@ -261,6 +315,12 @@
         }
 
         if (error && error.code) {
+          if (error.code === "timeout") {
+            throw makeError(
+              "Shared storage timed out before it could respond.",
+              "storage",
+            );
+          }
           throw error;
         }
 

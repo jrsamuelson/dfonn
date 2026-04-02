@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'/><meta name='viewport' content='width=device-width,initial-scale=1.0'/><title>ONN Scheduler</title><script crossorigin src='https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js'></script><script crossorigin src='https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js'></script><script src='./onn-netlify-storage.js'></script><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}</style></head><body><div id='root'></div><script>const {
+<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'/><meta name='viewport' content='width=device-width,initial-scale=1.0'/><title>ONN Scheduler</title><script src='./vendor/react.production.min.js'></script><script src='./vendor/react-dom.production.min.js'></script><script src='./onn-netlify-storage.js'></script><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}</style></head><body><div id='root'></div><script>(async()=>{if (!window.React || !window.ReactDOM) { const root = document.getElementById('root'); if (root) { root.innerHTML = "<div style=\"min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f8fafc;font-family:'Segoe UI',sans-serif;color:#0f172a;\"><div style=\"max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:24px;padding:28px 24px;box-shadow:0 16px 40px rgba(15,23,42,0.12);\"><div style=\"font-size:14px;letter-spacing:0.12em;text-transform:uppercase;color:#4f46e5;font-weight:700;margin-bottom:10px;\">ONN Scheduler</div><div style=\"font-size:28px;line-height:1.1;font-weight:800;margin-bottom:10px;\">The site could not load its app libraries</div><div style=\"font-size:14px;line-height:1.6;color:#475569;\">This usually means the local React runtime files did not load correctly. Try reloading, or check that the vendor files deployed with the site.</div></div></div>"; } throw new Error('ONN runtime failed to load React libraries.'); } const {
   useState,
   useEffect,
   useContext,
@@ -504,6 +504,7 @@ function buildIncomingCoverage(dayData, teamOnns) {
 //
 // Keys used by this app:
 //   onn_week5_YYYY-MM-DD   (weekly schedule data)
+//   onn_vacation_index_v1  (derived vacation carryover index)
 //   onn_team_v2            (team roster)
 //   onn_settings_v1        (preferences: lightMode, textSize, deptName, assistantEnabled, highContrastText)
 //   onn_team_nextid_v1     (high-water mark for future team IDs)
@@ -664,6 +665,8 @@ const SETTINGS_KEY = "onn_settings_v1";
 // Tracks the highest ID ever issued so deleting a member never lets a new one
 // inherit that ID and silently remap historical schedule data to the wrong person.
 const NEXT_ID_KEY = "onn_team_nextid_v1";
+const VACATION_INDEX_KEY = "onn_vacation_index_v1";
+let vacationCarryoverIndexCache = undefined;
 async function loadNextId() { return await StorageAdapter.get(NEXT_ID_KEY); }
 async function saveNextId(n) { await StorageAdapter.set(NEXT_ID_KEY, n); }
 
@@ -855,6 +858,144 @@ async function tryAcquireEditLock(ws, sessionId, opts = {}) {
 async function loadWeek(ws) {
   return await StorageAdapter.get(skey(ws));
 }
+function cloneCarryoverDocCoverage(docCoverage) {
+  if (!docCoverage || typeof docCoverage !== "object") return {};
+  const cloned = {};
+  Object.entries(docCoverage).forEach(([doctor, assignment]) => {
+    if (!assignment || typeof assignment !== "object") return;
+    cloned[doctor] = {
+      outlookOnnId: assignment.outlookOnnId != null ? assignment.outlookOnnId : "",
+      epicOnnId: assignment.epicOnnId != null ? assignment.epicOnnId : ""
+    };
+  });
+  return cloned;
+}
+function normalizeVacationCarryoverIndexEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const weekStart = toISODateString(entry.weekStart || "");
+  const occDate = toISODateString(entry.occDate || "");
+  const returnDate = toISODateString(entry.returnDate || "");
+  const onnId = entry.onnId != null ? String(entry.onnId).trim() : "";
+  if (!weekStart || !occDate || !returnDate || !onnId) return null;
+  return {
+    weekStart,
+    occDate,
+    returnDate,
+    onnId,
+    docCoverage: cloneCarryoverDocCoverage(entry.docCoverage)
+  };
+}
+function normalizeVacationCarryoverIndex(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const entries = Array.isArray(raw.entries)
+    ? raw.entries.map(normalizeVacationCarryoverIndexEntry).filter(Boolean)
+    : [];
+  return {
+    builtAt: typeof raw.builtAt === "string" ? raw.builtAt : "",
+    entries
+  };
+}
+function buildVacationCarryoverEntriesForWeek(ws, weekData, teamOnns = ONNs) {
+  if (!(ws instanceof Date) || Number.isNaN(ws.getTime()) || !weekData || typeof weekData !== "object") {
+    return [];
+  }
+  const entries = [];
+  const teamMap = new Map((teamOnns || []).map(onn => [String(onn.id), onn]));
+  DAYS.forEach((dayName, dayIdx) => {
+    const staff = weekData?.[dayName]?.staff;
+    if (!staff || typeof staff !== "object") return;
+    const occDate = new Date(ws);
+    occDate.setDate(ws.getDate() + dayIdx);
+    occDate.setHours(0, 0, 0, 0);
+    const occIso = toISODateString(occDate);
+    Object.entries(staff).forEach(([onnId, rawSlot]) => {
+      const member = teamMap.get(String(onnId));
+      if (!member || member.floater) return;
+      if (!rawSlot || rawSlot.status !== STATUS.VACATION) return;
+      const returnIso = toISODateString(rawSlot.returnDate || "");
+      const returnDate = parseDateAtStartOfDay(returnIso);
+      if (!returnIso || !returnDate || occDate >= returnDate) return;
+      entries.push({
+        weekStart: toISODateString(ws),
+        occDate: occIso,
+        returnDate: returnIso,
+        onnId: String(onnId),
+        docCoverage: cloneCarryoverDocCoverage(rawSlot.docCoverage)
+      });
+    });
+  });
+  return entries;
+}
+async function writeVacationCarryoverIndex(index) {
+  const normalized = normalizeVacationCarryoverIndex(index) || {
+    builtAt: new Date().toISOString(),
+    entries: []
+  };
+  vacationCarryoverIndexCache = normalized;
+  await StorageAdapter.set(VACATION_INDEX_KEY, normalized);
+}
+async function rebuildVacationCarryoverIndex(teamOnns = ONNs) {
+  const entries = [];
+  const weekKeys = await StorageAdapter.keys("onn_week5_");
+  for (const k of weekKeys) {
+    if (typeof k !== "string" || !k.startsWith("onn_week5_")) continue;
+    const keyDatePart = k.slice("onn_week5_".length);
+    const weekStart = parseDateAtStartOfDay(keyDatePart);
+    if (!weekStart) continue;
+    const stored = await StorageAdapter.get(k);
+    if (!stored || typeof stored !== "object") continue;
+    entries.push(...buildVacationCarryoverEntriesForWeek(weekStart, stored, teamOnns));
+  }
+  const rebuilt = {
+    builtAt: new Date().toISOString(),
+    entries
+  };
+  await writeVacationCarryoverIndex(rebuilt);
+  return rebuilt;
+}
+async function loadVacationCarryoverIndex(teamOnns = ONNs, {
+  rebuildIfMissing = false
+} = {}) {
+  if (vacationCarryoverIndexCache !== undefined) {
+    if (vacationCarryoverIndexCache || !rebuildIfMissing) {
+      return vacationCarryoverIndexCache;
+    }
+  }
+  const stored = normalizeVacationCarryoverIndex(await StorageAdapter.get(VACATION_INDEX_KEY));
+  if (stored) {
+    vacationCarryoverIndexCache = stored;
+    return stored;
+  }
+  if (!rebuildIfMissing) {
+    vacationCarryoverIndexCache = null;
+    return null;
+  }
+  try {
+    return await rebuildVacationCarryoverIndex(teamOnns);
+  } catch (err) {
+    console.warn("ONN Scheduler vacation carryover index rebuild failed:", err);
+    vacationCarryoverIndexCache = null;
+    return null;
+  }
+}
+async function updateVacationCarryoverIndexForWeek(ws, weekData, teamOnns = ONNs) {
+  try {
+    const weekStartIso = toISODateString(ws);
+    const current = await loadVacationCarryoverIndex(teamOnns, {
+      rebuildIfMissing: true
+    });
+    const existingEntries = current?.entries || [];
+    const next = {
+      builtAt: new Date().toISOString(),
+      entries: existingEntries
+        .filter(entry => entry.weekStart !== weekStartIso)
+        .concat(buildVacationCarryoverEntriesForWeek(ws, weekData, teamOnns))
+    };
+    await writeVacationCarryoverIndex(next);
+  } catch (err) {
+    console.warn("ONN Scheduler vacation carryover index update failed:", err);
+  }
+}
 async function saveWeek(ws, data) {
   if (!(ws instanceof Date) || isNaN(ws.getTime())) {
     alert("Cannot save: invalid week start date.");
@@ -879,6 +1020,7 @@ async function saveWeek(ws, data) {
       savedAt: new Date().toISOString(),
     },
   });
+  await updateVacationCarryoverIndexForWeek(ws, data);
 }
 
 function slotHasCoverageAssignments(slot) {
@@ -1003,58 +1145,32 @@ async function applyVacationCarryover(ws, weekData, teamOnns = ONNs) {
 
   const teamMap = new Map((teamOnns || []).map((o) => [String(o.id), o]));
 
-  // Only pull keys for this app (prefix filter avoids scanning whole storage)
-  const weekKeys = await StorageAdapter.keys("onn_week5_");
+  const carryoverIndex = await loadVacationCarryoverIndex(teamOnns, {
+    rebuildIfMissing: true
+  });
 
-for (const k of weekKeys) {
-  if (typeof k !== "string" || !k.startsWith("onn_week5_")) continue;
-  const keyDatePart = k.slice("onn_week5_".length);
-  const weekStart = parseDateAtStartOfDay(keyDatePart);
-  
-    if (!weekStart || weekStart > targetEnd) continue;
+  for (const entry of carryoverIndex?.entries || []) {
+    const member = teamMap.get(String(entry.onnId));
+    if (!member || member.floater) continue;
+    const occDate = parseDateAtStartOfDay(entry.occDate);
+    const retDate = parseDateAtStartOfDay(entry.returnDate);
+    if (!occDate || !retDate || occDate > targetEnd || retDate <= targetStart || occDate >= retDate) continue;
 
-    const stored = await StorageAdapter.get(k);
-    if (!stored || typeof stored !== "object") continue;
-
-    DAYS.forEach((dayName, dayIdx) => {
-      const staff = stored?.[dayName]?.staff;
-      if (!staff || typeof staff !== "object") return;
-
-      const occDate = new Date(weekStart);
-      occDate.setDate(weekStart.getDate() + dayIdx);
-      occDate.setHours(0, 0, 0, 0);
-
-      Object.entries(staff).forEach(([onnId, rawSlot]) => {
-        const member = teamMap.get(String(onnId));
-        if (!member || member.floater) return;
-        if (!rawSlot || rawSlot.status !== STATUS.VACATION) return;
-
-        const returnIso = toISODateString(rawSlot.returnDate || "");
-        if (!returnIso) return;
-
-        const retDate = parseDateAtStartOfDay(returnIso);
-        if (!retDate || occDate >= retDate || retDate <= targetStart) return;
-
-        for (let i = 0; i < DAYS.length; i++) {
-          const td = targetDates[i];
-          if (td >= occDate && td < retDate) {
-            const dName = DAYS[i];
-            const existing = byDay[dName][onnId];
-            const occTs = occDate.getTime();
-            if (!existing || occTs > existing.occTs) {
-              byDay[dName][onnId] = {
-                occTs,
-                returnDate: returnIso,
-                docCoverage:
-                  rawSlot.docCoverage && typeof rawSlot.docCoverage === "object"
-                    ? rawSlot.docCoverage
-                    : {},
-              };
-            }
-          }
+    for (let i = 0; i < DAYS.length; i++) {
+      const td = targetDates[i];
+      if (td >= occDate && td < retDate) {
+        const dName = DAYS[i];
+        const existing = byDay[dName][entry.onnId];
+        const occTs = occDate.getTime();
+        if (!existing || occTs > existing.occTs) {
+          byDay[dName][entry.onnId] = {
+            occTs,
+            returnDate: entry.returnDate,
+            docCoverage: cloneCarryoverDocCoverage(entry.docCoverage)
+          };
         }
-      });
-    });
+      }
+    }
   }
 
   const out = { ...weekData };
@@ -1111,7 +1227,11 @@ const hydrated = hydrateWeekData(baseWeek, teamOnns);
     ? hydrated
     : await applyVacationCarryover(ws, hydrated, teamOnns);
 
-  return { data: syncWeekDataToTeam(withCarry, teamOnns), existed: !!stored?._meta?.userSaved };
+  return {
+    data: syncWeekDataToTeam(withCarry, teamOnns),
+    existed: !!stored?._meta?.userSaved,
+    savedAt: stored?._meta?.savedAt || ""
+  };
 }
 
 async function exportAllData(teamList) {
@@ -1865,7 +1985,7 @@ function getDesignTheme(lm = false, highContrastText = false) {
     sectionBorder: "rgba(255,255,255,0.06)",
     rowBg: "#1e293b",
     rowAlt: "#223042",
-    rowAway: "#3a2227",
+    rowAway: "rgba(248,113,113,0.07)",
     rowBorder: "rgba(255,255,255,0.08)",
     textStrong: highContrastText ? "#ffffff" : "#f8fcff",
     textMain: highContrastText ? "#ffffff" : "#e2e8f0",
@@ -6410,6 +6530,72 @@ function AuthLoadingScreen() {
     }
   }, "Verifying whether this browser is already signed in.")));
 }
+function AuthUnavailableScreen({
+  error,
+  onRetry
+}) {
+  const t = getDesignTheme(true);
+  return /*#__PURE__*/React.createElement(AuthShell, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      maxWidth: "460px",
+      borderRadius: "28px",
+      padding: "30px",
+      background: "rgba(255,255,255,0.94)",
+      border: `1px solid ${t.panelBorder}`,
+      boxShadow: t.cardShadowStrong,
+      color: t.textStrong
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "14px",
+      letterSpacing: "0.12em",
+      textTransform: "uppercase",
+      color: t.accent,
+      fontWeight: 700,
+      marginBottom: "10px"
+    }
+  }, "Access Problem"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "30px",
+      lineHeight: 1.05,
+      fontWeight: 800,
+      marginBottom: "10px"
+    }
+  }, "Could not reach the access service"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "14px",
+      lineHeight: 1.6,
+      color: t.textSoft,
+      marginBottom: "16px"
+    }
+  }, "This usually means the Netlify auth/storage function is slow, temporarily unavailable, or blocked on this network. It is not the same as entering the wrong password."), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: "16px",
+      padding: "10px 12px",
+      borderRadius: "12px",
+      background: t.warnSoft,
+      border: `1px solid ${t.warnBorder}`,
+      color: t.warnText,
+      fontSize: "13px",
+      lineHeight: 1.5
+    }
+  }, error), /*#__PURE__*/React.createElement("button", {
+    onClick: onRetry,
+    style: {
+      width: "100%",
+      padding: "13px 18px",
+      borderRadius: "14px",
+      border: "none",
+      background: `linear-gradient(135deg,${t.navPrimaryBg},${t.accent})`,
+      color: t.textInverse,
+      fontFamily: "inherit",
+      fontSize: "14px",
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "Retry access check")));
+}
 function SharedPasswordGate({
   busy,
   error,
@@ -6512,11 +6698,43 @@ function Root() {
     enabled: false,
     authenticated: true,
     busy: false,
-    error: ""
+    error: "",
+    serviceError: ""
   });
+  const runAuthStatusCheck = React.useCallback(async () => {
+    const authClient = window.onnAuthClient;
+    if (!authClient || typeof authClient.status !== "function") {
+      setAuthState(prev => ({
+        ...prev,
+        checking: false,
+        enabled: false,
+        authenticated: true,
+        busy: false,
+        error: "",
+        serviceError: ""
+      }));
+      return;
+    }
+    setAuthState(prev => ({
+      ...prev,
+      checking: true,
+      busy: false,
+      error: "",
+      serviceError: ""
+    }));
+    try {
+      await authClient.status();
+    } catch (err) {
+      setAuthState(prev => ({
+        ...prev,
+        checking: false,
+        busy: false,
+        serviceError: err?.message || "Could not reach the ONN access service."
+      }));
+    }
+  }, []);
   React.useEffect(() => {
     let cancelled = false;
-    const authClient = window.onnAuthClient;
     const applyState = detail => {
       if (cancelled || !detail) return;
       setAuthState(prev => ({
@@ -6525,7 +6743,8 @@ function Root() {
         enabled: !!detail.enabled,
         authenticated: detail.authenticated !== false,
         busy: false,
-        error: ""
+        error: "",
+        serviceError: ""
       }));
     };
     const handleAuthState = event => applyState(event.detail);
@@ -6537,46 +6756,27 @@ function Root() {
         enabled: true,
         authenticated: false,
         busy: false,
-        error: "Your session expired. Enter the shared password again."
+        error: "Your session expired. Enter the shared password again.",
+        serviceError: ""
       }));
     };
     window.addEventListener("onn-auth-state", handleAuthState);
     window.addEventListener("onn-auth-required", handleAuthRequired);
-    if (!authClient || typeof authClient.status !== "function") {
-      applyState({
-        enabled: false,
-        authenticated: true
-      });
-      return () => {
-        cancelled = true;
-        window.removeEventListener("onn-auth-state", handleAuthState);
-        window.removeEventListener("onn-auth-required", handleAuthRequired);
-      };
-    }
-    authClient.status().catch(() => {
-      if (cancelled) return;
-      setAuthState(prev => ({
-        ...prev,
-        checking: false,
-        enabled: true,
-        authenticated: false,
-        busy: false,
-        error: "Could not verify access right now. Try signing in again."
-      }));
-    });
+    void runAuthStatusCheck();
     return () => {
       cancelled = true;
       window.removeEventListener("onn-auth-state", handleAuthState);
       window.removeEventListener("onn-auth-required", handleAuthRequired);
     };
-  }, []);
+  }, [runAuthStatusCheck]);
   const handleLogin = async password => {
     const authClient = window.onnAuthClient;
     if (!authClient || typeof authClient.login !== "function") return;
     setAuthState(prev => ({
       ...prev,
       busy: true,
-      error: ""
+      error: "",
+      serviceError: ""
     }));
     try {
       await authClient.login(password);
@@ -6584,7 +6784,7 @@ function Root() {
       setAuthState(prev => ({
         ...prev,
         busy: false,
-        error: err?.code === "auth" ? "That password did not work." : "Sign-in failed. Please try again."
+        error: err?.code === "auth" ? "That password did not work." : err?.message || "Sign-in failed. Please try again."
       }));
     }
   };
@@ -6604,6 +6804,12 @@ function Root() {
   };
   if (authState.checking) {
     return /*#__PURE__*/React.createElement(AuthLoadingScreen, null);
+  }
+  if (authState.serviceError) {
+    return /*#__PURE__*/React.createElement(AuthUnavailableScreen, {
+      error: authState.serviceError,
+      onRetry: runAuthStatusCheck
+    });
   }
   if (authState.enabled && !authState.authenticated) {
     return /*#__PURE__*/React.createElement(SharedPasswordGate, {
@@ -6766,10 +6972,14 @@ function App({
     setDraftRecovery(loadLocalDraft(weekStart));
     loadWeekWithCarryover(weekStart, teamList).then(async ({
       data,
-      existed
+      existed,
+      savedAt
     }) => {
       if (cancelled) return;
       setWeekHasSavedVersion(!!existed);
+      setWeekActivity({
+        savedAt: savedAt || ""
+      });
       if (data) {
         setWeekData(syncWeekDataToTeam(data, teamList));
         isDirty.current = false;
@@ -6788,6 +6998,9 @@ function App({
         console.error("ONN Scheduler week load error:", err);
       }
       setWeekHasSavedVersion(false);
+      setWeekActivity({
+        savedAt: ""
+      });
       setLoading(false);
     });
     return () => {
@@ -6804,11 +7017,6 @@ function App({
         savedAt: rawWeek?._meta?.savedAt || ""
       });
     };
-    update().catch(err => {
-      if (!cancelled && err?.code !== "auth") {
-        console.error("ONN Scheduler activity load error:", err);
-      }
-    });
     const timer = window.setInterval(() => {
       update().catch(err => {
         if (err?.code !== "auth") {
@@ -7264,7 +7472,6 @@ const handleTeamSave = (newList, newNextId) => {
       position: "relative"
     }
   }, /*#__PURE__*/React.createElement("style", null, `
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         html, body, #root { max-width:100%; overflow-x:hidden; }
         * { box-sizing:border-box; }
         ::-webkit-scrollbar { width:5px; height:5px; }
@@ -7911,4 +8118,4 @@ const handleTeamSave = (newList, newNextId) => {
   }))));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Root));
-</script></body></html>
+})();</script></body></html>
