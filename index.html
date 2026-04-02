@@ -454,7 +454,7 @@ function buildIncomingCoverage(dayData, teamOnns) {
 // Keys used by this app:
 //   onn_week5_YYYY-MM-DD   (weekly schedule data)
 //   onn_team_v2            (team roster)
-//   onn_settings_v1        (preferences: lightMode, textSize, deptName, assistantEnabled)
+//   onn_settings_v1        (preferences: lightMode, textSize, deptName, assistantEnabled, highContrastText)
 //   onn_team_nextid_v1     (high-water mark for future team IDs)
 //
 // IT checklist:
@@ -1685,11 +1685,22 @@ function normalizeTeam(list) {
 
 // ─── TEAM CONTEXT ────────────────────────────────────────────────────────────
 const TeamCtx = createContext(ONNs);
-const ThemeCtx = createContext(false);
-const useTheme = () => useContext(ThemeCtx);
+const ThemeCtx = createContext({
+  lightMode: false,
+  highContrastText: false
+});
+const useTheme = () => useContext(ThemeCtx).lightMode;
+const useHighContrast = () => useContext(ThemeCtx).highContrastText;
+const useDesignTheme = () => {
+  const {
+    lightMode,
+    highContrastText
+  } = useContext(ThemeCtx);
+  return getDesignTheme(lightMode, highContrastText);
+};
 const useTeam = () => useContext(TeamCtx);
 
-function getDesignTheme(lm = false) {
+function getDesignTheme(lm = false, highContrastText = false) {
   if (lm) {
     return {
       fontFamily: "'Plus Jakarta Sans','DM Sans','Segoe UI',sans-serif",
@@ -1697,10 +1708,10 @@ function getDesignTheme(lm = false) {
       navBg: "#ffffff",
       navBorder: "rgba(0,0,0,0.08)",
       navTitle: "#1e293b",
-      navSub: "#64748b",
+      navSub: highContrastText ? "#334155" : "#64748b",
       navChrome: "rgba(0,0,0,0.06)",
       navChromeBorder: "rgba(0,0,0,0.12)",
-      navChromeText: "#374151",
+      navChromeText: highContrastText ? "#1f2937" : "#374151",
       navPrimaryBg: "#6366f1",
       navPrimaryText: "#ffffff",
       navPrimarySoft: "#e0e7ff",
@@ -1719,7 +1730,7 @@ function getDesignTheme(lm = false) {
       cardBorder: "#e2e8f0",
       cardShadow: "0 2px 14px rgba(0,0,0,0.08)",
       cardShadowStrong: "0 8px 32px rgba(0,0,0,0.18)",
-      cardHeader: "#64748b",
+      cardHeader: highContrastText ? "#475569" : "#64748b",
       cardHeaderToday: "#4f46e5",
       cardHeaderHoliday: "#78716c",
       sectionBg: "#f8fafc",
@@ -1728,10 +1739,10 @@ function getDesignTheme(lm = false) {
       rowAlt: "#f7f9fb",
       rowAway: "#fff8f8",
       rowBorder: "rgba(226,232,240,0.6)",
-      textStrong: "#111827",
-      textMain: "#334155",
-      textMuted: "#64748b",
-      textSoft: "#94a3b8",
+      textStrong: highContrastText ? "#020617" : "#111827",
+      textMain: highContrastText ? "#0f172a" : "#334155",
+      textMuted: highContrastText ? "#334155" : "#64748b",
+      textSoft: highContrastText ? "#475569" : "#94a3b8",
       textInverse: "#ffffff",
       accent: "#8b5cf6",
       accentStrong: "#4338ca",
@@ -1748,7 +1759,7 @@ function getDesignTheme(lm = false) {
       warnBorder: "#fcd34d",
       overlay: "rgba(0,0,0,0.3)",
       chipNeutralBg: "#f1f5f9",
-      chipNeutralText: "#475569",
+      chipNeutralText: highContrastText ? "#334155" : "#475569",
       chipNeutralBorder: "#e2e8f0",
       focus: "#6366f1",
       todayTabBg: "#4f46e5",
@@ -1756,11 +1767,11 @@ function getDesignTheme(lm = false) {
       currentMonthText: "#ffffff",
       monthBg: "#f1f5f9",
       monthHoverBg: "#e0e7ff",
-      monthText: "#374151",
-      monthHoverText: "#4338ca",
+      monthText: highContrastText ? "#1f2937" : "#374151",
+      monthHoverText: highContrastText ? "#312e81" : "#4338ca",
       floatBg: "#f0f9ff",
       floatBorder: "#bae6fd",
-      floatText: "#0369a1",
+      floatText: highContrastText ? "#075985" : "#0369a1",
       modalBg: "#ffffff",
       modalBorder: "rgba(0,0,0,0.1)",
       modalChrome: "#f8fafc",
@@ -1774,10 +1785,10 @@ function getDesignTheme(lm = false) {
     navBg: "#0f172a",
     navBorder: "rgba(255,255,255,0.1)",
     navTitle: "#f8fafc",
-    navSub: "#94a3b8",
+    navSub: highContrastText ? "#e2e8f0" : "#94a3b8",
     navChrome: "rgba(255,255,255,0.06)",
     navChromeBorder: "rgba(255,255,255,0.1)",
-    navChromeText: "#cbd5e1",
+    navChromeText: highContrastText ? "#f8fafc" : "#cbd5e1",
     navPrimaryBg: "#6366f1",
     navPrimaryText: "#ffffff",
     navPrimarySoft: "rgba(99,102,241,0.2)",
@@ -1796,7 +1807,7 @@ function getDesignTheme(lm = false) {
     cardBorder: "rgba(255,255,255,0.1)",
     cardShadow: "0 2px 14px rgba(0,0,0,0.2)",
     cardShadowStrong: "0 12px 40px rgba(0,0,0,0.2)",
-    cardHeader: "#475569",
+    cardHeader: highContrastText ? "#64748b" : "#475569",
     cardHeaderToday: "#4f46e5",
     cardHeaderHoliday: "#78716c",
     sectionBg: "#1e293b",
@@ -1805,10 +1816,10 @@ function getDesignTheme(lm = false) {
     rowAlt: "#223042",
     rowAway: "#3a2227",
     rowBorder: "rgba(255,255,255,0.08)",
-    textStrong: "#f8fcff",
-    textMain: "#e2e8f0",
-    textMuted: "#94a3b8",
-    textSoft: "#94a3b8",
+    textStrong: highContrastText ? "#ffffff" : "#f8fcff",
+    textMain: highContrastText ? "#f8fafc" : "#e2e8f0",
+    textMuted: highContrastText ? "#e2e8f0" : "#94a3b8",
+    textSoft: highContrastText ? "#cbd5e1" : "#94a3b8",
     textInverse: "#ffffff",
     accent: "#8b5cf6",
     accentStrong: "#a5b4fc",
@@ -1825,7 +1836,7 @@ function getDesignTheme(lm = false) {
     warnBorder: "rgba(245,158,11,0.25)",
     overlay: "rgba(0,0,0,0.7)",
     chipNeutralBg: "rgba(255,255,255,0.06)",
-    chipNeutralText: "#cbd5e1",
+    chipNeutralText: highContrastText ? "#f8fafc" : "#cbd5e1",
     chipNeutralBorder: "rgba(255,255,255,0.12)",
     focus: "#6366f1",
     todayTabBg: "#4f46e5",
@@ -1833,11 +1844,11 @@ function getDesignTheme(lm = false) {
     currentMonthText: "#ffffff",
     monthBg: "rgba(255,255,255,0.1)",
     monthHoverBg: "rgba(255,255,255,0.22)",
-    monthText: "#e2e8f0",
-    monthHoverText: "#f8fbff",
+    monthText: highContrastText ? "#f8fafc" : "#e2e8f0",
+    monthHoverText: "#ffffff",
     floatBg: "rgba(56,189,248,0.14)",
     floatBorder: "rgba(125,211,252,0.28)",
-    floatText: "#7dd3fc",
+    floatText: highContrastText ? "#bae6fd" : "#7dd3fc",
     modalBg: "#1e293b",
     modalBorder: "rgba(255,255,255,0.12)",
     modalChrome: "rgba(255,255,255,0.07)",
@@ -1884,8 +1895,8 @@ function useViewportWidth() {
 
 // ─── STYLE CONSTANTS ─────────────────────────────────────────────────────────
 
-const NAV_BTN = (lm = false) => {
-  const t = getDesignTheme(lm);
+const NAV_BTN = (lm = false, hc = false) => {
+  const t = getDesignTheme(lm, hc);
   return {
   background: t.navChrome,
   border: `1px solid ${t.navChromeBorder}`,
@@ -1912,8 +1923,8 @@ const PRI_BTN = {
   fontSize: "12px",
   fontFamily: "inherit"
 };
-const SEC_BTN = (lm = false) => {
-  const t = getDesignTheme(lm);
+const SEC_BTN = (lm = false, hc = false) => {
+  const t = getDesignTheme(lm, hc);
   return {
   background: t.panelAlt,
   border: `1px solid ${t.panelBorder}`,
@@ -1925,8 +1936,8 @@ const SEC_BTN = (lm = false) => {
   fontSize: "12px",
   fontFamily: "inherit"
 };};
-const GHOST_BTN = (lm = false) => {
-  const t = getDesignTheme(lm);
+const GHOST_BTN = (lm = false, hc = false) => {
+  const t = getDesignTheme(lm, hc);
   return {
   background: "transparent",
   border: `1px solid ${t.panelBorder}`,
@@ -1938,8 +1949,8 @@ const GHOST_BTN = (lm = false) => {
   fontSize: "12px",
   fontFamily: "inherit"
 };};
-const NBTN = (lm = false, active = false) => {
-  const t = getDesignTheme(lm);
+const NBTN = (lm = false, active = false, hc = false) => {
+  const t = getDesignTheme(lm, hc);
   return {
   height: "34px",
   padding: "0 14px",
@@ -1958,15 +1969,15 @@ const NBTN = (lm = false, active = false) => {
   flexShrink: 0,
   boxShadow: active ? (lm ? "0 10px 24px rgba(21,63,105,0.22)" : "0 12px 26px rgba(0,0,0,0.3)") : "none"
 };};
-const dayTabStyle = (active, isToday = false, lm = false, ts = 0) => {
-  const t = getDesignTheme(lm);
+const dayTabStyle = (active, isToday = false, lm = false, ts = 0, hc = false) => {
+  const t = getDesignTheme(lm, hc);
   return {
   padding: ts === 2 ? "10px 20px" : ts === 1 ? "8px 17px" : "7px 15px",
   borderRadius: "14px",
   border: active ? "none" : `1px solid ${t.panelBorder}`,
-  background: active ? isToday ? t.todayTabBg : t.panelBg : t.panelAlt,
-  color: active ? isToday ? t.textInverse : t.textStrong : t.textMuted,
-  fontWeight: active ? 700 : 500,
+  background: active ? isToday ? t.cardHeaderToday : t.cardHeader : t.panelAlt,
+  color: active ? t.textInverse : t.textMuted,
+  fontWeight: active ? 800 : 500,
   fontSize: ts === 2 ? "15px" : ts === 1 ? "13px" : "12px",
   cursor: "pointer",
   fontFamily: "inherit",
@@ -2040,7 +2051,7 @@ function Chip({
   value
 }) {
   const lm = useTheme();
-  const t = getDesignTheme(lm);
+  const t = useDesignTheme();
   return /*#__PURE__*/React.createElement("span", {
     style: {
       display: "inline-flex",
@@ -2069,7 +2080,7 @@ function StatChip({
   color
 }) {
   const lm = useTheme();
-  const t = getDesignTheme(lm);
+  const t = useDesignTheme();
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -2127,8 +2138,7 @@ function OnnSelect({
   ONNs,
   placeholder
 }) {
-  const lm = useTheme();
-  const t = getDesignTheme(lm);
+  const t = useDesignTheme();
   return /*#__PURE__*/React.createElement("select", {
     value: value || "",
     onChange: e => onChange(e.target.value),
@@ -2358,8 +2368,7 @@ function VacCoveragePanel({
 function IncomingCoverageBadges({
   items
 }) {
-  const lm = useTheme();
-  const t = getDesignTheme(lm);
+  const t = useDesignTheme();
   if (!items || items.length === 0) return null;
   // Group by doctor+fromOnn so same pair shows on one line
   const grouped = [];
@@ -2767,7 +2776,7 @@ function StaffRow({
 }) {
   const ONNs = useTeam();
   const lm = useTheme();
-  const t = getDesignTheme(lm);
+  const t = useDesignTheme();
   const c = STATUS_CONFIG[slot.status];
   const statusTone = getStatusTone(slot.status, lm);
   const away = isAway(slot.status) && !onn.floater; // floaters always appear "present"
@@ -3329,8 +3338,7 @@ function FloaterPicker({
   onAdd,
   compact = false
 }) {
-  const lm = useTheme();
-  const t = getDesignTheme(lm);
+  const t = useDesignTheme();
   const [open, setOpen] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState("");
   const [selectedStatus, setSelectedStatus] = React.useState(STATUS.CH);
@@ -3532,7 +3540,7 @@ function DayCard({
   rowExpandValue = false
 }) {
   const lm = useTheme();
-  const t = getDesignTheme(lm);
+  const t = useDesignTheme();
   const ONNs = useTeam();
   const cardRef = React.useRef(null);
   const [cardW, setCardW] = React.useState(999);
@@ -4679,10 +4687,11 @@ function MonthBtn({
   label,
   isCur,
   lightMode,
+  highContrastText = false,
   onClick
 }) {
   const [hovered, setHovered] = React.useState(false);
-  const t = getDesignTheme(lightMode);
+  const t = getDesignTheme(lightMode, highContrastText);
   const bg = isCur ? t.currentMonthBg : hovered ? t.monthHoverBg : t.monthBg;
   const color = isCur ? t.currentMonthText : hovered ? t.monthHoverText : t.monthText;
   return /*#__PURE__*/React.createElement("button", {
@@ -5769,6 +5778,8 @@ function SettingsModal({
   setLightMode,
   textSize,
   setTextSize,
+  highContrastText,
+  setHighContrastText,
   teamList,
   weekData,
   weekStart,
@@ -5779,7 +5790,7 @@ function SettingsModal({
   nextId
 }) {
   const lm = lightMode;
-  const t = getDesignTheme(lm);
+  const t = getDesignTheme(lm, highContrastText);
   const viewportWidth = useViewportWidth();
   const isPhone = viewportWidth <= 640;
   const [tab, setTab] = React.useState("team");
@@ -5792,18 +5803,21 @@ function SettingsModal({
   const [resetConfirm, setResetConfirm] = React.useState(false);
   const [prefLightMode, setPrefLightMode] = React.useState(lightMode);
   const [prefTextSize, setPrefTextSize] = React.useState(textSize);
+  const [prefHighContrastText, setPrefHighContrastText] = React.useState(highContrastText);
   const [prefDeptName, setPrefDeptName] = React.useState(deptName);
   const [prefAssistantEnabled, setPrefAssistantEnabled] = React.useState(assistantEnabled);
   const icsFileRef = React.useRef(null);
   const initialPrefsRef = React.useRef({
     lightMode,
     textSize,
+    highContrastText,
     deptName,
     assistantEnabled
   });
   const closeWithoutSavingPrefs = () => {
     setLightMode(initialPrefsRef.current.lightMode);
     setTextSize(initialPrefsRef.current.textSize);
+    setHighContrastText(initialPrefsRef.current.highContrastText);
     setDeptName(initialPrefsRef.current.deptName);
     setAssistantEnabled(initialPrefsRef.current.assistantEnabled);
     onClose();
@@ -5939,8 +5953,8 @@ function SettingsModal({
     fontSize: "12px",
     flex: isPhone ? 1 : undefined,
     cursor: "pointer",
-    background: tab === t ? getDesignTheme(lm).accentSoft : "transparent",
-    color: tab === t ? getDesignTheme(lm).accentStrong : getDesignTheme(lm).textMuted
+    background: tab === t ? getDesignTheme(lm, highContrastText).accentSoft : "transparent",
+    color: tab === t ? getDesignTheme(lm, highContrastText).accentStrong : getDesignTheme(lm, highContrastText).textMuted
   });
   const settingRow = {
     display: "flex",
@@ -6083,6 +6097,37 @@ function SettingsModal({
       cursor: "pointer",
       background: prefTextSize === val ? t.panelBg : "transparent",
       color: prefTextSize === val ? t.textStrong : t.textMuted
+    }
+  }, label)))), /*#__PURE__*/React.createElement("div", {
+    style: settingRow
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: settingLabel
+  }, "High contrast text"), /*#__PURE__*/React.createElement("div", {
+    style: settingDesc
+  }, "Boosts text contrast throughout the scheduler so labels and details are easier to read.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: "4px",
+      background: t.modalChrome,
+      borderRadius: "10px",
+      padding: "3px"
+    }
+  }, [[false, "Off"], [true, "On"]].map(([val, label]) => /*#__PURE__*/React.createElement("button", {
+    key: label,
+    onClick: () => {
+      setPrefHighContrastText(val);
+      setHighContrastText(val);
+    },
+    style: {
+      padding: "6px 14px",
+      borderRadius: "6px",
+      border: "none",
+      fontFamily: "inherit",
+      fontWeight: 600,
+      fontSize: "12px",
+      cursor: "pointer",
+      background: prefHighContrastText === val ? t.panelBg : "transparent",
+      color: prefHighContrastText === val ? t.textStrong : t.textMuted
     }
   }, label)))), /*#__PURE__*/React.createElement("div", {
     style: settingRow
@@ -6339,11 +6384,13 @@ function SettingsModal({
         const next = {
           lightMode: !!prefLightMode,
           textSize: [0, 1, 2].includes(Number(prefTextSize)) ? Number(prefTextSize) : 0,
+          highContrastText: prefHighContrastText === true,
           deptName: (prefDeptName || "").trim() || "Oncology Nurse Navigator",
           assistantEnabled: prefAssistantEnabled !== false
         };
         setLightMode(next.lightMode);
         setTextSize(next.textSize);
+        setHighContrastText(next.highContrastText);
         setDeptName(next.deptName);
         setAssistantEnabled(next.assistantEnabled);
         if (typeof onPreferencesSave === "function") onPreferencesSave(next);
@@ -6648,11 +6695,13 @@ function App({
   const [showJump, setShowJump] = useState(false);
   const [lightMode, setLightMode] = useState(true);
   const [textSize, setTextSize] = useState(0);
+  const [highContrastText, setHighContrastText] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [rowExpandSignal, setRowExpandSignal] = useState(0);
   const [rowExpandValue, setRowExpandValue] = useState(false);
   const [deptName, setDeptName] = useState("Oncology Nurse Navigator");
   const [assistantEnabled, setAssistantEnabled] = useState(true);
+  const [weekHasSavedVersion, setWeekHasSavedVersion] = useState(false);
   const [teamLoaded, setTeamLoaded] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [draftRecovery, setDraftRecovery] = React.useState(null);
@@ -6701,6 +6750,7 @@ function App({
       if (typeof saved.lightMode === "boolean") setLightMode(saved.lightMode);
       const savedTextSize = Number(saved.textSize);
       if ([0, 1, 2].includes(savedTextSize)) setTextSize(savedTextSize);
+      if (typeof saved.highContrastText === "boolean") setHighContrastText(saved.highContrastText);
       if (typeof saved.deptName === "string" && saved.deptName.trim()) setDeptName(saved.deptName.trim());
       if (typeof saved.assistantEnabled === "boolean") setAssistantEnabled(saved.assistantEnabled);
     }).catch(err => {
@@ -6718,18 +6768,19 @@ function App({
     saveSettings({
       lightMode,
       textSize,
+      highContrastText,
       deptName,
       assistantEnabled
     }).catch(err => {
       if (err?.code === "auth") return;
       console.error("ONN Scheduler settings save error:", err);
     });
-  }, [settingsLoaded, showSettings, lightMode, textSize, deptName, assistantEnabled]);
+  }, [settingsLoaded, showSettings, lightMode, textSize, highContrastText, deptName, assistantEnabled]);
 	const [teamList, setTeamList] = useState(sortONNs(normalizeTeam(ONNs)));
 	const [teamNextId, setTeamNextId] = useState(0);
 
   const todayStr = new Date().toDateString();
-  const T = getDesignTheme(lightMode);
+  const T = getDesignTheme(lightMode, highContrastText);
 
 	useEffect(() => {
 	  Promise.all([loadTeam(), loadNextId()]).then(([savedTeam, savedNextId]) => {
@@ -6764,6 +6815,7 @@ function App({
       existed
     }) => {
       if (cancelled) return;
+      setWeekHasSavedVersion(!!existed);
       if (data) {
         setWeekData(syncWeekDataToTeam(data, teamList));
         isDirty.current = false;
@@ -6781,6 +6833,7 @@ function App({
       if (err?.code !== "auth") {
         console.error("ONN Scheduler week load error:", err);
       }
+      setWeekHasSavedVersion(false);
       setLoading(false);
     });
     return () => {
@@ -6865,6 +6918,7 @@ function App({
     return () => window.removeEventListener("beforeunload", warnOnUnload);
   }, [editMode, hasUnsaved]);
   const [showClearConfirm, setShowClearConfirm] = React.useState(false);
+  const [copyingLastWeek, setCopyingLastWeek] = React.useState(false);
   const handleClearScope = async () => {
     const clearedWeek = buildClearedWeek(teamList);
     if (activeDay) {
@@ -6886,7 +6940,34 @@ function App({
     setSaved(false);
   };
   const clearScopeNoun = activeDay ? "day" : "week";
+  const canCopyLastWeek = editMode && !loading && !activeDay && !showClearConfirm && !hasUnsaved && !weekHasSavedVersion;
   const [saveError, setSaveError] = React.useState(null);
+  const handleCopyLastWeek = async () => {
+    if (!canCopyLastWeek || copyingLastWeek) return;
+    setCopyingLastWeek(true);
+    setSaveError(null);
+    try {
+      const previousWeekStart = new Date(weekStart);
+      previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+      const loaded = await loadWeekWithCarryover(previousWeekStart, teamList);
+      const copiedBase = loaded?.data && typeof loaded.data === "object" ? loaded.data : buildDefault(teamList);
+      const {
+        _meta,
+        ...copiedWeek
+      } = copiedBase;
+      setWeekData(syncWeekDataToTeam(copiedWeek, teamList));
+      isDirty.current = true;
+      setHasUnsaved(true);
+      setSaved(false);
+    } catch (err) {
+      if (err?.code !== "auth") {
+        console.error("ONN Scheduler copy last week error:", err);
+      }
+      setSaveError("Last week could not be loaded to copy.");
+    } finally {
+      setCopyingLastWeek(false);
+    }
+  };
   const beginEditMode = async () => {
     setSaveError(null);
     await tryAcquireEditLock(weekStart, editSessionIdRef.current);
@@ -6916,6 +6997,7 @@ function App({
       await refreshWeekActivity();
       isDirty.current = false;
       setHasUnsaved(false);
+      setWeekHasSavedVersion(true);
       setSaving(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -7141,11 +7223,13 @@ const handleTeamSave = (newList, newNextId) => {
     const next = {
       lightMode: !!prefs?.lightMode,
       textSize: [0, 1, 2].includes(Number(prefs?.textSize)) ? Number(prefs.textSize) : 0,
+      highContrastText: prefs?.highContrastText === true,
       deptName: (prefs?.deptName || "").trim() || "Oncology Nurse Navigator",
       assistantEnabled: prefs?.assistantEnabled !== false
     };
     setLightMode(next.lightMode);
     setTextSize(next.textSize);
+    setHighContrastText(next.highContrastText);
     setDeptName(next.deptName);
     setAssistantEnabled(next.assistantEnabled);
     saveSettings(next).catch(err => {
@@ -7158,6 +7242,7 @@ const handleTeamSave = (newList, newNextId) => {
     if (!result.updatedWeeks.includes(skey(weekStart))) return;
     const refreshed = await loadWeekWithCarryover(weekStart, teamList);
     setWeekData(refreshed?.data || syncWeekDataToTeam(buildDefault(teamList), teamList));
+    setWeekHasSavedVersion(!!refreshed?.existed);
     setEditMode(false);
     setSaved(false);
     setHasUnsaved(false);
@@ -7177,7 +7262,10 @@ const handleTeamSave = (newList, newNextId) => {
     isDirty.current = true;
   };
   return /*#__PURE__*/React.createElement(ThemeCtx.Provider, {
-    value: lightMode
+    value: {
+      lightMode,
+      highContrastText
+    }
   }, /*#__PURE__*/React.createElement(TeamCtx.Provider, {
     value: teamList
   }, showPrint && /*#__PURE__*/React.createElement(PrintView, {
@@ -7198,6 +7286,8 @@ const handleTeamSave = (newList, newNextId) => {
     setLightMode: setLightMode,
     textSize: textSize,
     setTextSize: setTextSize,
+    highContrastText: highContrastText,
+    setHighContrastText: setHighContrastText,
     teamList: teamList,
     weekData: weekData,
     weekStart: weekStart,
@@ -7212,6 +7302,7 @@ const handleTeamSave = (newList, newNextId) => {
       background: T.pageBg,
       fontFamily: T.fontFamily,
       fontSize: textSize === 2 ? "18px" : textSize === 1 ? "16px" : "14px",
+      color: T.textMain,
       paddingBottom: isPhone ? "calc(28px + env(safe-area-inset-bottom, 0px))" : "60px",
       position: "relative"
     }
@@ -7306,7 +7397,7 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => navigateWeek(w => w - 1),
-    style: NAV_BTN(lightMode)
+    style: NAV_BTN(lightMode, highContrastText)
   }, "‹"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowJump(v => !v),
     style: {
@@ -7331,7 +7422,7 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, weekDates[0].getFullYear(), " ", showJump ? "▲" : "▼")), /*#__PURE__*/React.createElement("button", {
     onClick: () => navigateWeek(w => w + 1),
-    style: NAV_BTN(lightMode)
+    style: NAV_BTN(lightMode, highContrastText)
   }, "›"), /*#__PURE__*/React.createElement("button", {
     onClick: weekOffset !== 0 ? () => navigateWeek(0) : undefined,
     style: {
@@ -7394,6 +7485,7 @@ const handleTeamSave = (newList, newNextId) => {
       label: label,
       isCur: isCur,
       lightMode: lightMode,
+      highContrastText: highContrastText,
       onClick: () => {
         const now = new Date(),
           curMon = new Date(now),
@@ -7418,7 +7510,7 @@ const handleTeamSave = (newList, newNextId) => {
     title: ["Normal size", "Large text", "Extra large"][textSize],
     onClick: () => setTextSize(s => (s + 1) % 3),
     style: {
-      ...NBTN(lightMode),
+      ...NBTN(lightMode, false, highContrastText),
       fontSize: "14px",
       fontWeight: 700
     }
@@ -7427,13 +7519,13 @@ const handleTeamSave = (newList, newNextId) => {
       if (editMode && hasUnsaved && !confirmDiscardUnsaved()) return;
       setShowSettings(true);
     },
-    style: NBTN(lightMode)
+    style: NBTN(lightMode, false, highContrastText)
   }, "Settings"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (editMode && hasUnsaved && !confirmDiscardUnsaved()) return;
       setShowPrint(true);
     },
-    style: NBTN(lightMode)
+    style: NBTN(lightMode, false, highContrastText)
   }, "Print"), editMode ? /*#__PURE__*/React.createElement(React.Fragment, null, saveError && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: "11px",
@@ -7469,8 +7561,12 @@ const handleTeamSave = (newList, newNextId) => {
       setEditMode(false);
       setShowClearConfirm(false);
       loadWeekWithCarryover(weekStart, teamList).then(({
-        data
-      }) => setWeekData(data || syncWeekDataToTeam(buildDefault(teamList), teamList))).catch(err => {
+        data,
+        existed
+      }) => {
+        setWeekData(data || syncWeekDataToTeam(buildDefault(teamList), teamList));
+        setWeekHasSavedVersion(!!existed);
+      }).catch(err => {
         if (err?.code !== "auth") {
           console.error("ONN Scheduler week reload error:", err);
         }
@@ -7479,11 +7575,11 @@ const handleTeamSave = (newList, newNextId) => {
       setHasUnsaved(false);
       isDirty.current = false;
     },
-    style: NBTN(lightMode)
+    style: NBTN(lightMode, false, highContrastText)
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: handleSave,
     style: {
-      ...NBTN(lightMode, true),
+      ...NBTN(lightMode, true, highContrastText),
       ...(hasUnsaved && !saving && !saved ? {
         background: T.dangerText,
         color: T.textInverse
@@ -7499,7 +7595,7 @@ const handleTeamSave = (newList, newNextId) => {
   }, saving ? "Saving…" : saved ? "Saved" : "Save Edits")) : /*#__PURE__*/React.createElement("button", {
     onClick: () => beginEditMode(),
     style: {
-      ...NBTN(lightMode, true)
+      ...NBTN(lightMode, true, highContrastText)
     }
   }, "Edit Schedule")))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7603,12 +7699,12 @@ const handleTeamSave = (newList, newNextId) => {
   }, editMode && showClearConfirm && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowClearConfirm(false),
     style: {
-      ...NBTN(lightMode)
+      ...NBTN(lightMode, false, highContrastText)
     }
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: handleClearScope,
     style: {
-      ...NBTN(lightMode),
+      ...NBTN(lightMode, false, highContrastText),
       color: T.dangerText,
       background: T.dangerSoft,
       border: `1px solid ${T.dangerBorder}`
@@ -7616,7 +7712,7 @@ const handleTeamSave = (newList, newNextId) => {
   }, activeDay ? "Confirm clear day" : "Confirm clear week")), editMode && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowClearConfirm(c => !c),
     style: {
-      ...NBTN(lightMode),
+      ...NBTN(lightMode, false, highContrastText),
       color: showClearConfirm ? T.dangerText : undefined,
       background: showClearConfirm ? T.dangerSoft : undefined
     },
@@ -7644,16 +7740,22 @@ const handleTeamSave = (newList, newNextId) => {
       alignItems: "center",
       minHeight: "34px"
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: "6px",
+      flexWrap: "wrap",
+      justifyContent: isNarrowLayout ? "center" : "flex-start"
+    }
   }, editMode && showClearConfirm && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowClearConfirm(false),
     style: {
-      ...NBTN(lightMode)
+      ...NBTN(lightMode, false, highContrastText)
     }
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: handleClearScope,
     style: {
-      ...NBTN(lightMode),
-      marginLeft: "6px",
+      ...NBTN(lightMode, false, highContrastText),
       color: "#dc2626",
       background: lightMode ? "#fee2e2" : "rgba(239,68,68,0.15)",
       border: "1px solid rgba(239,68,68,0.3)"
@@ -7661,11 +7763,22 @@ const handleTeamSave = (newList, newNextId) => {
   }, "Confirm clear ", clearScopeNoun)), editMode && !showClearConfirm && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowClearConfirm(true),
     style: {
-      ...NBTN(lightMode),
+      ...NBTN(lightMode, false, highContrastText),
       color: "#dc2626"
     },
     title: activeDay ? "Clear all schedule entries for this day" : "Clear all schedule entries for this week"
-  }, "Clear ", clearScopeNoun)), /*#__PURE__*/React.createElement("div", {
+  }, "Clear ", clearScopeNoun), editMode && !showClearConfirm && canCopyLastWeek && /*#__PURE__*/React.createElement("button", {
+    onClick: handleCopyLastWeek,
+    disabled: copyingLastWeek,
+    style: {
+      ...NBTN(lightMode, false, highContrastText),
+      color: T.accentStrong,
+      background: T.accentSoft,
+      border: `1px solid ${T.accentBorder}`,
+      cursor: copyingLastWeek ? "default" : "pointer",
+      opacity: copyingLastWeek ? 0.8 : 1
+    }
+  }, copyingLastWeek ? "Copying…" : "Copy Last Week"))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: "7px",
@@ -7681,13 +7794,13 @@ const handleTeamSave = (newList, newNextId) => {
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setActiveDay(null),
-    style: dayTabStyle(activeDay === null, false, lightMode, textSize)
+    style: dayTabStyle(activeDay === null, false, lightMode, textSize, highContrastText)
   }, "Week"), DAYS.map((day, i) => {
     const isToday = weekDates[i].toDateString() === todayStr;
     return /*#__PURE__*/React.createElement("button", {
       key: day,
       onClick: () => setActiveDay(day),
-      style: dayTabStyle(activeDay === day, isToday, lightMode, textSize)
+      style: dayTabStyle(activeDay === day, isToday, lightMode, textSize, highContrastText)
     }, day.slice(0, 3), " ", fmt(weekDates[i]));
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7697,7 +7810,7 @@ const handleTeamSave = (newList, newNextId) => {
   }, /*#__PURE__*/React.createElement("button", {
     onClick: toggleAllDetails,
     style: {
-      ...NBTN(lightMode)
+      ...NBTN(lightMode, false, highContrastText)
     }
   }, rowExpandValue ? "Hide details" : "Show details")))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7734,13 +7847,13 @@ const handleTeamSave = (newList, newNextId) => {
   }, /*#__PURE__*/React.createElement("button", {
     onClick: handleRestoreDraft,
     style: {
-      ...NBTN(lightMode, true),
+      ...NBTN(lightMode, true, highContrastText),
       background: lightMode ? "#2563eb" : "#1d4ed8",
       color: "#fff"
     }
   }, "Restore draft"), /*#__PURE__*/React.createElement("button", {
     onClick: clearCurrentLocalDraft,
-    style: NBTN(lightMode)
+    style: NBTN(lightMode, false, highContrastText)
   }, "Discard draft"))), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
       color: lightMode ? "#64748b" : "#94a3b8",
