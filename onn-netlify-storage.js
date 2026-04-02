@@ -7,34 +7,81 @@
 
   function createLocalStorageBackend(namespace) {
     const keyFor = (key) => `${namespace}${key}`;
+    const memory = new Map();
+    let warned = false;
+
+    function warnFallback(error) {
+      if (warned) return;
+      warned = true;
+      console.warn(
+        "ONN Scheduler local storage is unavailable here. Keeping data in memory for this tab only.",
+        error,
+      );
+    }
+
+    function withLocalFallback(runStorage, runMemory) {
+      try {
+        return runStorage(window.localStorage);
+      } catch (error) {
+        warnFallback(error);
+        return runMemory();
+      }
+    }
 
     return {
       name: "localStorage",
 
       async get(key) {
-        const value = localStorage.getItem(keyFor(key));
+        const fullKey = keyFor(key);
+        const value = withLocalFallback(
+          (storage) => storage.getItem(fullKey),
+          () => (memory.has(fullKey) ? memory.get(fullKey) : null),
+        );
         return value == null ? null : { value };
       },
 
       async set(key, value) {
-        localStorage.setItem(keyFor(key), value);
+        const fullKey = keyFor(key);
+        withLocalFallback(
+          (storage) => storage.setItem(fullKey, value),
+          () => {
+            memory.set(fullKey, value);
+          },
+        );
       },
 
       async delete(key) {
-        localStorage.removeItem(keyFor(key));
+        const fullKey = keyFor(key);
+        withLocalFallback(
+          (storage) => storage.removeItem(fullKey),
+          () => {
+            memory.delete(fullKey);
+          },
+        );
       },
 
       async list(prefix) {
         const fullPrefix = keyFor(prefix || "");
-        const keys = [];
+        const keys = withLocalFallback(
+          (storage) => {
+            const nextKeys = [];
 
-        for (let index = 0; index < localStorage.length; index += 1) {
-          const rawKey = localStorage.key(index);
-          if (!rawKey || !rawKey.startsWith(fullPrefix)) continue;
-          keys.push(rawKey.slice(namespace.length));
-        }
+            for (let index = 0; index < storage.length; index += 1) {
+              const rawKey = storage.key(index);
+              if (!rawKey || !rawKey.startsWith(fullPrefix)) continue;
+              nextKeys.push(rawKey.slice(namespace.length));
+            }
 
-        keys.sort();
+            nextKeys.sort();
+            return nextKeys;
+          },
+          () =>
+            Array.from(memory.keys())
+              .filter((rawKey) => rawKey.startsWith(fullPrefix))
+              .map((rawKey) => rawKey.slice(namespace.length))
+              .sort(),
+        );
+
         return { keys };
       },
     };
@@ -185,7 +232,7 @@
         });
 
         if (response.headers.get("x-onn-storage") !== "1") {
-          if (mode === "unknown" && canFallbackToLocal) {
+          if (canFallbackToLocal && (mode === "unknown" || mode === "local")) {
             setMode("local");
             return null;
           }
@@ -208,7 +255,7 @@
 
         return response;
       } catch (error) {
-        if (mode === "unknown" && canFallbackToLocal) {
+        if (canFallbackToLocal && (mode === "unknown" || mode === "local")) {
           setMode("local");
           return null;
         }

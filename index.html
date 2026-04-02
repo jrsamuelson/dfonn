@@ -471,33 +471,76 @@ function buildIncomingCoverage(dayData, teamOnns) {
 
 function createLocalStorageBackend(namespace = "onn_scheduler:") {
   const keyFor = (k) => `${namespace}${k}`;
+  const memory = new Map();
+  let warned = false;
+
+  function warnFallback(error) {
+    if (warned) return;
+    warned = true;
+    console.warn("ONN Scheduler local storage is unavailable here. Keeping data in memory for this tab only.", error);
+  }
+
+  function withLocalFallback(runStorage, runMemory) {
+    try {
+      return runStorage(window.localStorage);
+    } catch (error) {
+      warnFallback(error);
+      return runMemory();
+    }
+  }
 
   return {
     name: "localStorage",
 
     async get(key) {
-      const v = localStorage.getItem(keyFor(key));
+      const fullKey = keyFor(key);
+      const v = withLocalFallback(
+        storage => storage.getItem(fullKey),
+        () => (memory.has(fullKey) ? memory.get(fullKey) : null)
+      );
       return v == null ? null : { value: v };
     },
 
     async set(key, value) {
-      localStorage.setItem(keyFor(key), value);
+      const fullKey = keyFor(key);
+      withLocalFallback(
+        storage => storage.setItem(fullKey, value),
+        () => {
+          memory.set(fullKey, value);
+        }
+      );
     },
 
     async delete(key) {
-      localStorage.removeItem(keyFor(key));
+      const fullKey = keyFor(key);
+      withLocalFallback(
+        storage => storage.removeItem(fullKey),
+        () => {
+          memory.delete(fullKey);
+        }
+      );
     },
 
     async list(prefix = "") {
       const fullPrefix = keyFor(prefix);
-      const keys = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const rawKey = localStorage.key(i);
-        if (!rawKey) continue;
-        if (!rawKey.startsWith(fullPrefix)) continue;
-        keys.push(rawKey.slice(namespace.length)); // strip namespace
-      }
-      keys.sort();
+      const keys = withLocalFallback(
+        storage => {
+          const nextKeys = [];
+          for (let i = 0; i < storage.length; i++) {
+            const rawKey = storage.key(i);
+            if (!rawKey) continue;
+            if (!rawKey.startsWith(fullPrefix)) continue;
+            nextKeys.push(rawKey.slice(namespace.length)); // strip namespace
+          }
+          nextKeys.sort();
+          return nextKeys;
+        },
+        () =>
+          Array.from(memory.keys())
+            .filter(rawKey => rawKey.startsWith(fullPrefix))
+            .map(rawKey => rawKey.slice(namespace.length))
+            .sort()
+      );
       return { keys };
     },
   };
