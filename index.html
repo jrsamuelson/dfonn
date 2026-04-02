@@ -2236,7 +2236,7 @@ function VacCoveragePanel({
             color: "#dc2626",
             fontWeight: 600
           }
-        }, doc), " ", /*#__PURE__*/React.createElement("span", {
+        }, `${doc}:`), " ", /*#__PURE__*/React.createElement("span", {
           style: {
             color: "#64748b"
           }
@@ -2258,7 +2258,7 @@ function VacCoveragePanel({
           color: "#dc2626",
           fontWeight: 600
         }
-      }, doc), " ", /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), " ", /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b"
         }
@@ -2272,7 +2272,7 @@ function VacCoveragePanel({
           color: "#dc2626",
           fontWeight: 600
         }
-      }, doc), " ", /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), " ", /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b"
         }
@@ -2408,7 +2408,7 @@ function IncomingCoverageBadges({
       color: "#dc2626",
       fontWeight: 600
     }
-  }, g.doctor), " ", /*#__PURE__*/React.createElement("span", {
+  }, `${g.doctor}:`), " ", /*#__PURE__*/React.createElement("span", {
     style: {
       color: "#64748b"
     }
@@ -2697,7 +2697,7 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
 
     // ── note
     slot.note && /*#__PURE__*/React.createElement("div", {
-      style: { marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #f1f5f9", fontSize: "10px", color: "#64748b", fontStyle: "italic" }
+      style: { marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #f1f5f9", fontSize: "10px", color: "#334155", fontStyle: "italic", fontWeight: 500 }
     }, "📝 ", slot.note)
   );
 }
@@ -3232,11 +3232,12 @@ function StaffRow({
     style: {
       marginTop: "3px",
       fontSize: "10px",
-      color: t.textSoft,
+      color: t.textMain,
       fontStyle: "italic",
+      fontWeight: 500,
       order: 99
     }
-}, "📝 ", slot.note), density === 3 && away && !onn.floater && isSingle && !showCollapsedCoverage && /*#__PURE__*/React.createElement(CompactCoverageText, {
+  }, "📝 ", slot.note), density === 3 && away && !onn.floater && isSingle && !showCollapsedCoverage && /*#__PURE__*/React.createElement(CompactCoverageText, {
     onn: onn,
     slot: slot,
     ONNs: ONNs,
@@ -4237,8 +4238,9 @@ onClick: () => {
     }, printStatusLabelForSlot(slot, onn)), floaterActiveToday && slot.note && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: "9px",
-        color: "#475569",
+        color: "#334155",
         fontStyle: "italic",
+        fontWeight: 500,
         marginTop: "2px"
       }
     }, "Note: ", slot.note), !onn.floater && isAway(slot.status) && onn.primary.map(doc => {
@@ -4270,7 +4272,7 @@ onClick: () => {
           fontWeight: 700,
           whiteSpace: "nowrap"
         }
-      }, doc), /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b",
           whiteSpace: "nowrap"
@@ -4294,7 +4296,7 @@ onClick: () => {
           fontWeight: 700,
           whiteSpace: "nowrap"
         }
-      }, doc), /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b"
         }
@@ -4316,7 +4318,7 @@ onClick: () => {
           fontWeight: 700,
           whiteSpace: "nowrap"
         }
-      }, doc), /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b"
         }
@@ -4359,7 +4361,7 @@ onClick: () => {
           color: "#dc2626",
           fontWeight: 700
         }
-      }, g.doctor), /*#__PURE__*/React.createElement("span", {
+      }, `${g.doctor}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#475569"
         }
@@ -4527,8 +4529,9 @@ onClick: () => {
       }
     }, slot.note && /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#475569",
+        color: "#334155",
         fontStyle: "italic",
+        fontWeight: 500,
         marginBottom: "3px"
       }
     }, "Note: ", slot.note), !onn.floater && isAway(slot.status) && onn.primary.map(doc => {
@@ -4557,7 +4560,7 @@ onClick: () => {
           fontWeight: 700,
           whiteSpace: "nowrap"
         }
-      }, doc), /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b"
         }
@@ -4578,7 +4581,7 @@ onClick: () => {
           fontWeight: 700,
           whiteSpace: "nowrap"
         }
-      }, doc), /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b"
         }
@@ -4599,7 +4602,7 @@ onClick: () => {
           fontWeight: 700,
           whiteSpace: "nowrap"
         }
-      }, doc), /*#__PURE__*/React.createElement("span", {
+      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#64748b"
         }
@@ -4640,7 +4643,7 @@ onClick: () => {
           color: "#dc2626",
           fontWeight: 700
         }
-      }, g.doctor), /*#__PURE__*/React.createElement("span", {
+      }, `${g.doctor}:`), /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#475569"
         }
