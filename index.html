@@ -157,6 +157,8 @@ const STATUS_CONFIG = {
 const isAway = s => STATUS_CONFIG[s]?.away === true;
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 const LOCAL_DRAFT_PREFIX = "onn_scheduler:localdraft_v1:";
+const LAST_ACTIVE_DAY_KEY = "onn_scheduler:last_active_day_v1:";
+const WEEK_VIEW_TOKEN = "__week__";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -176,6 +178,38 @@ function getWeekDates(ws) {
     return d;
   });
 }
+function getTodayDefaultActiveDay() {
+  const today = new Date();
+  const dow = today.getDay();
+  if (dow === 0 || dow === 6) return null;
+  return DAYS[dow - 1] || null;
+}
+function loadLastActiveDay() {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage.getItem(LAST_ACTIVE_DAY_KEY);
+    if (raw === WEEK_VIEW_TOKEN) return null;
+    return DAYS.includes(raw) ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function saveLastActiveDay(day) {
+  if (typeof window === "undefined") return;
+  try {
+    if (day === null) {
+      window.localStorage.setItem(LAST_ACTIVE_DAY_KEY, WEEK_VIEW_TOKEN);
+      return;
+    }
+    if (DAYS.includes(day)) {
+      window.localStorage.setItem(LAST_ACTIVE_DAY_KEY, day);
+    }
+  } catch {}
+}
+function getInitialActiveDay() {
+  const stored = loadLastActiveDay();
+  return stored !== undefined ? stored : getTodayDefaultActiveDay();
+}
 function getDefaultStatusForDay(onn, day) {
   if (onn?.floater) return STATUS.OFF;
   return onn?.defaults?.[day] || STATUS.CH;
@@ -188,16 +222,7 @@ function buildDefault(teamOnns = ONNs) {
       staff: {}
     };
     teamOnns.forEach(o => {
-      data[day].staff[o.id] = {
-        status: getDefaultStatusForDay(o, day),
-        cov1: "",
-        cov2: "",
-        docCoverage: {},
-        returnDate: "",
-        note: "",
-        floaterActive: false,
-        floaterLoc: o.floater ? STATUS.CH : ""
-      };
+      data[day].staff[o.id] = buildInitialSlot(o, day);
     });
   });
   return data;
@@ -211,7 +236,7 @@ function buildClearedWeek(teamOnns = ONNs) {
       staff: {}
     };
     teamOnns.forEach(o => {
-      data[day].staff[o.id] = buildInitialSlot(o);
+      data[day].staff[o.id] = buildInitialSlot(o, day);
     });
   });
   return data;
@@ -284,6 +309,32 @@ function printStatusLabelForSlot(slot, onn) {
   if (s === STATUS.OFF) return "Off";
   if (s === STATUS.VACATION) return "Vacation";
   return "Chestnut Hill";
+}
+function PrintCoverageSentence({
+  doctor,
+  detail,
+  style = {}
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: "9px",
+      textAlign: "left",
+      lineHeight: 1.35,
+      whiteSpace: "normal",
+      overflowWrap: "break-word",
+      ...style
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#dc2626",
+      fontWeight: 700
+    }
+  }, `${doctor}: `), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#334155",
+      fontWeight: 500
+    }
+  }, detail));
 }
 function parseDateAtStartOfDay(dateStr) {
   if (!dateStr) return null;
@@ -1646,9 +1697,9 @@ async function importOutlookCalendarFileText(file, text, teamList) {
   return await importOutlookCalendarIcsText(trimmedText, teamList);
 }
 
-function buildInitialSlot(onn) {
+function buildInitialSlot(onn, day = "") {
   return {
-    status: onn.floater ? STATUS.OFF : STATUS.CH,
+    status: day ? getDefaultStatusForDay(onn, day) : onn.floater ? STATUS.OFF : STATUS.CH,
     cov1: "",
     cov2: "",
     docCoverage: {},
@@ -2238,14 +2289,10 @@ function VacCoveragePanel({
           }
         }, `${doc}:`), " ", /*#__PURE__*/React.createElement("span", {
           style: {
-            color: "#64748b"
+            color: "#334155",
+            fontWeight: 500
           }
-        }, "Outlook & Epic to"), " ", /*#__PURE__*/React.createElement("span", {
-          style: {
-            color: "#64748b",
-            fontWeight: 400
-          }
-        }, emailOnn.name));
+        }, `Outlook & Epic to ${emailOnn.name}`));
       }
       return /*#__PURE__*/React.createElement("div", {
         key: doc,
@@ -2260,28 +2307,20 @@ function VacCoveragePanel({
         }
       }, `${doc}:`), " ", /*#__PURE__*/React.createElement("span", {
         style: {
-          color: "#64748b"
+          color: "#334155",
+          fontWeight: 500
         }
-      }, "Outlook to"), " ", /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#64748b",
-          fontWeight: 400
-        }
-      }, emailOnn.name)), epicOnn && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+      }, `Outlook to ${emailOnn.name}`)), epicOnn && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
         style: {
           color: "#dc2626",
           fontWeight: 600
         }
       }, `${doc}:`), " ", /*#__PURE__*/React.createElement("span", {
         style: {
-          color: "#64748b"
+          color: "#334155",
+          fontWeight: 500
         }
-      }, "Epic to"), " ", /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#64748b",
-          fontWeight: 400
-        }
-      }, epicOnn.name)), !emailOnn && !epicOnn && /*#__PURE__*/React.createElement("div", {
+      }, `Epic to ${epicOnn.name}`)), !emailOnn && !epicOnn && /*#__PURE__*/React.createElement("div", {
         style: {
           color: "#94a3b8",
           fontStyle: "italic"
@@ -2410,14 +2449,33 @@ function IncomingCoverageBadges({
     }
   }, `${g.doctor}:`), " ", /*#__PURE__*/React.createElement("span", {
     style: {
-      color: t.textMuted
-    }
-  }, g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic from" : g.duties.includes("outlook") ? "Outlook from" : "Epic from"), " ", /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: t.textMuted,
+      color: "#334155",
       fontWeight: 500
     }
-  }, g.fromOnnName))));
+  }, `${g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic" : g.duties.includes("outlook") ? "Outlook" : "Epic"} from ${g.fromOnnName}`))));
+}
+
+function CaretIcon({
+  open = false,
+  size = 10
+}) {
+  return /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 12 12",
+    width: size,
+    height: size,
+    "aria-hidden": "true",
+    focusable: "false",
+    style: {
+      display: "block",
+      flexShrink: 0,
+      transform: open ? "rotate(90deg)" : "none",
+      transformOrigin: "50% 50%",
+      transition: "transform 0.14s ease"
+    }
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M3 2.5L9 6L3 9.5Z",
+    fill: "currentColor"
+  }));
 }
 
 // ─── VACATION RETURN DATE ────────────────────────────────────────────────────
@@ -2665,13 +2723,9 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
         return /*#__PURE__*/React.createElement("div", {
           key: doc, style: { fontSize: "10px", color: "#374151", marginBottom: "2px", display: "flex", gap: "4px", alignItems: "baseline" }
         },
-          /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#dc2626" } }, doc),
+          /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#dc2626" } }, `${doc}:`),
           dutyLabel
-            ? /*#__PURE__*/React.createElement(React.Fragment, null,
-                /*#__PURE__*/React.createElement("span", { style: { color: "#64748b" } }, dutyLabel),
-                /*#__PURE__*/React.createElement("span", { style: { color: "#64748b" } }, "to"),
-                /*#__PURE__*/React.createElement("span", { style: { fontWeight: 400, color: "#64748b" } }, targetOnn.name)
-              )
+            ? /*#__PURE__*/React.createElement("span", { style: { color: "#334155", fontWeight: 500 } }, `${dutyLabel} to ${targetOnn.name}`)
             : /*#__PURE__*/React.createElement("span", { style: { color: "#f87171" } }, "⚠ unassigned")
         );
       })
@@ -2685,13 +2739,11 @@ function OnnTooltip({ onn, slot, incomingCoverage, ONNs, coverageTargetIds = nul
       grouped.map((g, i) => /*#__PURE__*/React.createElement("div", {
         key: i, style: { fontSize: "10px", color: "#374151", marginBottom: "3px" }
       },
-        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#dc2626" } }, g.doctor),
+        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#dc2626" } }, `${g.doctor}:`),
         " ",
-        /*#__PURE__*/React.createElement("span", { style: { color: "#64748b" } },
-          g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic" : g.duties.includes("outlook") ? "Outlook" : "Epic"
-        ),
-        " from ",
-        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 400, color: "#64748b" } }, g.fromOnnName)
+        /*#__PURE__*/React.createElement("span", { style: { color: "#334155", fontWeight: 500 } },
+          `${g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic" : g.duties.includes("outlook") ? "Outlook" : "Epic"} from ${g.fromOnnName}`
+        )
       ))
     ),
 
@@ -3040,9 +3092,14 @@ function StaffRow({
         fontFamily: "inherit",
         fontWeight: 700,
         flexShrink: 0,
-        lineHeight: 1
+        lineHeight: 1,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center"
       }
-    }, expanded ? "▼" : "▶");
+    }, /*#__PURE__*/React.createElement(CaretIcon, {
+      open: expanded
+    }));
   })(), density === 2 && away && !onn.floater && isSingle && (() => {
     return /*#__PURE__*/React.createElement("button", {
       onClick: () => setExpanded(e => !e),
@@ -3056,9 +3113,14 @@ function StaffRow({
         fontFamily: "inherit",
         fontWeight: 700,
         flexShrink: 0,
-        lineHeight: 1
+        lineHeight: 1,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center"
       }
-    }, expanded ? "▼" : "▶");
+    }, /*#__PURE__*/React.createElement(CaretIcon, {
+      open: expanded
+    }));
   })(), showCollapsedCoverage && /*#__PURE__*/React.createElement("button", {
     onClick: () => setExpanded(e => !e),
     style: {
@@ -3071,9 +3133,14 @@ function StaffRow({
       fontFamily: "inherit",
       fontWeight: 700,
       flexShrink: 0,
-      lineHeight: 1
+      lineHeight: 1,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center"
     }
-  }, expanded ? "▼" : "▶"), showWeekAwayToggle && /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement(CaretIcon, {
+    open: expanded
+  })), showWeekAwayToggle && /*#__PURE__*/React.createElement("button", {
     onClick: () => setExpanded(e => !e),
     style: {
       fontSize: "0.9em",
@@ -3085,9 +3152,14 @@ function StaffRow({
       fontFamily: "inherit",
       fontWeight: 700,
       flexShrink: 0,
-      lineHeight: 1
+      lineHeight: 1,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center"
     }
-  }, expanded ? "▼" : "▶"), showWeekIncomingToggle && /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement(CaretIcon, {
+    open: expanded
+  })), showWeekIncomingToggle && /*#__PURE__*/React.createElement("button", {
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
@@ -3099,9 +3171,14 @@ function StaffRow({
       fontFamily: "inherit",
       fontWeight: 700,
       flexShrink: 0,
-      lineHeight: 1
+      lineHeight: 1,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center"
     }
-  }, incomingExpanded ? "▼" : "▶"), showDayIncomingToggle && /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement(CaretIcon, {
+    open: incomingExpanded
+  })), showDayIncomingToggle && /*#__PURE__*/React.createElement("button", {
     onClick: () => setIncomingExpanded(v => !v),
     style: {
       fontSize: "0.9em",
@@ -3113,9 +3190,14 @@ function StaffRow({
       fontFamily: "inherit",
       fontWeight: 700,
       flexShrink: 0,
-      lineHeight: 1
+      lineHeight: 1,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center"
     }
-  }, incomingExpanded ? "▼" : "▶")), statusNode), density >= 2 && !onn.floater && onn.primary.length > 0 && !showDragSourcePills && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(CaretIcon, {
+    open: incomingExpanded
+  }))), statusNode), density >= 2 && !onn.floater && onn.primary.length > 0 && !showDragSourcePills && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: "1px",
       fontSize: "0.76em",
@@ -4253,81 +4335,20 @@ onClick: () => {
         key: doc,
         style: {
           marginTop: "3px",
-          fontSize: "9px",
-          textAlign: "left",
           display: "flex",
           flexDirection: "column",
           gap: "2px"
         }
-      }, same ? /*#__PURE__*/React.createElement("div", {
-        style: {
-          display: "flex",
-          alignItems: "baseline",
-          gap: "3px",
-          flexWrap: "nowrap"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#dc2626",
-          fontWeight: 700,
-          whiteSpace: "nowrap"
-        }
-      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#64748b",
-          whiteSpace: "nowrap"
-        }
-      }, "Outlook & Epic to"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#64748b",
-          whiteSpace: "nowrap"
-        }
-      }, emailOnn.name)) : /*#__PURE__*/React.createElement(React.Fragment, null, emailOnn && /*#__PURE__*/React.createElement("div", {
-        style: {
-          display: "flex",
-          alignItems: "baseline",
-          gap: "3px",
-          flexWrap: "nowrap"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#dc2626",
-          fontWeight: 700,
-          whiteSpace: "nowrap"
-        }
-      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#64748b"
-        }
-      }, "Outlook to"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#64748b"
-        }
-      }, emailOnn.name)), epicOnn && /*#__PURE__*/React.createElement("div", {
-        style: {
-          display: "flex",
-          alignItems: "baseline",
-          gap: "3px",
-          flexWrap: "nowrap"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#dc2626",
-          fontWeight: 700,
-          whiteSpace: "nowrap"
-        }
-      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#64748b"
-        }
-      }, "Epic to"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#64748b"
-        }
-      }, epicOnn.name)), !emailOnn && !epicOnn && /*#__PURE__*/React.createElement("div", {
+      }, same ? /*#__PURE__*/React.createElement(PrintCoverageSentence, {
+        doctor: doc,
+        detail: `Outlook & Epic to ${emailOnn.name}`
+      }) : /*#__PURE__*/React.createElement(React.Fragment, null, emailOnn && /*#__PURE__*/React.createElement(PrintCoverageSentence, {
+        doctor: doc,
+        detail: `Outlook to ${emailOnn.name}`
+      }), epicOnn && /*#__PURE__*/React.createElement(PrintCoverageSentence, {
+        doctor: doc,
+        detail: `Epic to ${epicOnn.name}`
+      }), !emailOnn && !epicOnn && /*#__PURE__*/React.createElement("div", {
         style: {
           color: "#94a3b8",
           fontStyle: "italic"
@@ -4345,32 +4366,14 @@ onClick: () => {
           duties: [item.duty]
         });
       });
-      return grouped.map((g, idx) => /*#__PURE__*/React.createElement("div", {
+      return grouped.map((g, idx) => /*#__PURE__*/React.createElement(PrintCoverageSentence, {
         key: idx,
+        doctor: g.doctor,
+        detail: `${g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic" : g.duties.includes("outlook") ? "Outlook" : "Epic"} from ${g.fromOnnName}`,
         style: {
-          marginTop: "2px",
-          fontSize: "9px",
-          textAlign: "left",
-          display: "flex",
-          alignItems: "baseline",
-          gap: "3px",
-          flexWrap: "nowrap"
+          marginTop: "2px"
         }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#dc2626",
-          fontWeight: 700
-        }
-      }, `${g.doctor}:`), /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#475569"
-        }
-      }, g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic from" : g.duties.includes("outlook") ? "Outlook from" : "Epic from"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#475569"
-        }
-      }, g.fromOnnName)));
+      }));
     })());
   }))), /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -4548,70 +4551,25 @@ onClick: () => {
           flexDirection: "column",
           gap: "1px"
         }
-      }, same ? /*#__PURE__*/React.createElement("div", {
+      }, same ? /*#__PURE__*/React.createElement(PrintCoverageSentence, {
+        doctor: doc,
+        detail: `Outlook & Epic to ${emailOnn.name}`,
         style: {
-          display: "flex",
-          alignItems: "center",
-          gap: "4px"
+          fontSize: "10px"
         }
-      }, /*#__PURE__*/React.createElement("span", {
+      }) : /*#__PURE__*/React.createElement(React.Fragment, null, emailOnn && /*#__PURE__*/React.createElement(PrintCoverageSentence, {
+        doctor: doc,
+        detail: `Outlook to ${emailOnn.name}`,
         style: {
-          color: "#dc2626",
-          fontWeight: 700,
-          whiteSpace: "nowrap"
+          fontSize: "10px"
         }
-      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
+      }), epicOnn && /*#__PURE__*/React.createElement(PrintCoverageSentence, {
+        doctor: doc,
+        detail: `Epic to ${epicOnn.name}`,
         style: {
-          color: "#64748b"
+          fontSize: "10px"
         }
-      }, "Outlook & Epic to"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#64748b"
-        }
-      }, emailOnn.name)) : /*#__PURE__*/React.createElement(React.Fragment, null, emailOnn && /*#__PURE__*/React.createElement("div", {
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: "4px"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#dc2626",
-          fontWeight: 700,
-          whiteSpace: "nowrap"
-        }
-      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#64748b"
-        }
-      }, "Outlook to"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#64748b"
-        }
-      }, emailOnn.name)), epicOnn && /*#__PURE__*/React.createElement("div", {
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: "4px"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#dc2626",
-          fontWeight: 700,
-          whiteSpace: "nowrap"
-        }
-      }, `${doc}:`), /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#64748b"
-        }
-      }, "Epic to"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#64748b"
-        }
-      }, epicOnn.name)), !emailOnn && !epicOnn && /*#__PURE__*/React.createElement("div", {
+      }), !emailOnn && !epicOnn && /*#__PURE__*/React.createElement("div", {
         style: {
           color: "#94a3b8",
           fontStyle: "italic"
@@ -4629,30 +4587,15 @@ onClick: () => {
           duties: [item.duty]
         });
       });
-      return grouped.map((g, idx) => /*#__PURE__*/React.createElement("div", {
+      return grouped.map((g, idx) => /*#__PURE__*/React.createElement(PrintCoverageSentence, {
         key: idx,
+        doctor: g.doctor,
+        detail: `${g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic" : g.duties.includes("outlook") ? "Outlook" : "Epic"} from ${g.fromOnnName}`,
         style: {
-          marginBottom: "2px",
-          display: "flex",
-          alignItems: "baseline",
-          gap: "3px",
-          flexWrap: "nowrap"
+          fontSize: "10px",
+          marginBottom: "2px"
         }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#dc2626",
-          fontWeight: 700
-        }
-      }, `${g.doctor}:`), /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#475569"
-        }
-      }, g.duties.includes("outlook") && g.duties.includes("epic") ? "Outlook & Epic from" : g.duties.includes("outlook") ? "Outlook from" : "Epic from"), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 400,
-          color: "#475569"
-        }
-      }, g.fromOnnName)));
+      }));
     })()));
   }), /*#__PURE__*/React.createElement("tr", {
     style: {
@@ -6686,12 +6629,7 @@ function App({
   const [saved, setSaved] = useState(false);
   const [hasUnsaved, setHasUnsaved] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeDay, setActiveDay] = useState(() => {
-    const today = new Date();
-    const dow = today.getDay(); // 0=Sun,6=Sat
-    if (dow === 0 || dow === 6) return null; // weekend → week view
-    return ["Monday","Tuesday","Wednesday","Thursday","Friday"][dow - 1];
-  });
+  const [activeDay, setActiveDay] = useState(() => getInitialActiveDay());
   const [statusFilter, setStatusFilter] = useState(null);
   const [focusedDay, setFocusedDay] = useState(null);
   const [showPrint, setShowPrint] = useState(false);
@@ -6736,7 +6674,6 @@ function App({
       void releaseEditLock(weekStart, editSessionIdRef.current);
     }
     setWeekOffset(next);
-    setActiveDay(prev => prev === null ? null : "Monday");
   };
   const toggleAllDetails = () => {
     setRowExpandValue(prev => {
@@ -6779,10 +6716,24 @@ function App({
       console.error("ONN Scheduler settings save error:", err);
     });
   }, [settingsLoaded, showSettings, lightMode, textSize, highContrastText, deptName, assistantEnabled]);
+  useEffect(() => {
+    saveLastActiveDay(activeDay);
+  }, [activeDay]);
 	const [teamList, setTeamList] = useState(sortONNs(normalizeTeam(ONNs)));
 	const [teamNextId, setTeamNextId] = useState(0);
 
   const todayStr = new Date().toDateString();
+  const todayTargetDay = getTodayDefaultActiveDay();
+  const showTodayButton = weekOffset !== 0 || activeDay !== todayTargetDay;
+  const goToToday = () => {
+    if (editMode && hasUnsaved && !confirmDiscardUnsaved()) return;
+    if (editMode) {
+      void releaseEditLock(weekStart, editSessionIdRef.current);
+    }
+    setShowJump(false);
+    setWeekOffset(0);
+    setActiveDay(todayTargetDay);
+  };
   const T = getDesignTheme(lightMode, highContrastText);
 
 	useEffect(() => {
@@ -7430,7 +7381,7 @@ const handleTeamSave = (newList, newNextId) => {
     onClick: () => navigateWeek(w => w + 1),
     style: NAV_BTN(lightMode, highContrastText)
   }, "›"), /*#__PURE__*/React.createElement("button", {
-    onClick: weekOffset !== 0 ? () => navigateWeek(0) : undefined,
+    onClick: showTodayButton ? goToToday : undefined,
     style: {
       height: "30px",
       padding: "0 12px",
@@ -7438,11 +7389,11 @@ const handleTeamSave = (newList, newNextId) => {
       fontFamily: "inherit",
       fontSize: "11px",
       fontWeight: 600,
-      border: weekOffset !== 0 ? `1px solid ${T.accentBorder}` : "none",
-      background: weekOffset !== 0 ? T.accentSoft : "transparent",
-      color: weekOffset !== 0 ? T.accentStrong : "transparent",
-      cursor: weekOffset !== 0 ? "pointer" : "default",
-      pointerEvents: weekOffset !== 0 ? "auto" : "none",
+      border: showTodayButton ? `1px solid ${T.accentBorder}` : "none",
+      background: showTodayButton ? T.accentSoft : "transparent",
+      color: showTodayButton ? T.accentStrong : "transparent",
+      cursor: showTodayButton ? "pointer" : "default",
+      pointerEvents: showTodayButton ? "auto" : "none",
       minWidth: "52px",
       flexShrink: 0
     }

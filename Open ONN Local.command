@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PORT=8000
+BIND_HOST=127.0.0.1
 
 while lsof -PiTCP:$PORT -sTCP:LISTEN -t >/dev/null 2>&1; do
   PORT=$((PORT + 1))
@@ -18,12 +19,24 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-python3 -m http.server "$PORT" >/tmp/onn-local-server.log 2>&1 &
+python3 -m http.server --bind "$BIND_HOST" "$PORT" >/tmp/onn-local-server.log 2>&1 &
 SERVER_PID=$!
 
-sleep 1
+for _ in {1..50}; do
+  if nc -z "$BIND_HOST" "$PORT" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
 
-URL="http://127.0.0.1:${PORT}/index.html"
+if ! nc -z "$BIND_HOST" "$PORT" >/dev/null 2>&1; then
+  echo
+  echo "ONN local server did not start correctly."
+  echo "Check /tmp/onn-local-server.log for details."
+  exit 1
+fi
+
+URL="http://${BIND_HOST}:${PORT}/index.html"
 open "$URL"
 
 echo
