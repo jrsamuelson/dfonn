@@ -1945,10 +1945,10 @@ const dayTabStyle = (active, isToday = false, lm = false, ts = 0, hc = false) =>
   return {
   padding: ts === 2 ? "10px 20px" : ts === 1 ? "8px 17px" : "7px 15px",
   borderRadius: "14px",
-  border: active ? "none" : `1px solid ${t.panelBorder}`,
-  background: active ? isToday ? t.todayTabBg : t.panelBg : t.panelAlt,
-  color: active ? isToday ? t.textInverse : t.textStrong : t.textMuted,
-  fontWeight: active ? 700 : 500,
+  border: "1px solid transparent",
+  background: active ? t.todayTabBg : t.cardHeader,
+  color: t.textInverse,
+  fontWeight: active ? 700 : 600,
   fontSize: ts === 2 ? "15px" : ts === 1 ? "13px" : "12px",
   cursor: "pointer",
   fontFamily: "inherit",
@@ -3206,7 +3206,7 @@ function StaffRow({
     style: {
       marginTop: "3px",
       fontSize: "10px",
-      color: t.textSoft,
+      color: t.textMain,
       fontStyle: "italic",
       order: 99
     }
@@ -3659,7 +3659,8 @@ function DayCard({
       // no minHeight — content sizes the card
       display: "flex",
       flexDirection: "column",
-      boxShadow: isToday ? t.cardShadowStrong : t.cardShadow
+      boxShadow: isToday ? t.cardShadowStrong : t.cardShadow,
+      transition: "opacity 0.15s ease"
     }
   }, /*#__PURE__*/React.createElement("div", {
     onClick: onHeaderClick,
@@ -6920,6 +6921,34 @@ function App({
     setEditMode(true);
     setSaved(false);
   };
+  const copyLastWeek = async () => {
+    if (!window.confirm("Copy last week's schedule into this week? This will overwrite any current edits.")) return;
+    const prevStart = new Date(weekStart);
+    prevStart.setDate(prevStart.getDate() - 7);
+    try {
+      const raw = await loadWeek(prevStart);
+      if (!raw || typeof raw !== "object") {
+        alert("No saved schedule found for last week.");
+        return;
+      }
+      const hydrated = hydrateWeekData(raw, teamList);
+      const synced = syncWeekDataToTeam(hydrated, teamList);
+      // Clear metadata and vacation-specific fields so it's treated as fresh edits
+      const copied = {};
+      DAYS.forEach(day => {
+        copied[day] = { notes: synced[day]?.notes || "", holiday: synced[day]?.holiday || false, staff: {} };
+        Object.entries(synced[day]?.staff || {}).forEach(([id, slot]) => {
+          copied[day].staff[id] = { ...slot, returnDate: "", docCoverage: slot.docCoverage || {} };
+        });
+      });
+      setWeekData(copied);
+      isDirty.current = true;
+      setHasUnsaved(true);
+    } catch (err) {
+      console.error("Copy last week error:", err);
+      alert("Could not load last week's schedule.");
+    }
+  };
   const handleSave = async () => {
     if (!hasUnsaved) {
       // Nothing changed—don’t persist this week (prevents freezing predictions).
@@ -7649,7 +7678,10 @@ const handleTeamSave = (newList, newNextId) => {
       background: showClearConfirm ? T.dangerSoft : undefined
     },
     title: activeDay ? "Clear all schedule entries for this day" : "Clear all schedule entries for this week"
-  }, activeDay ? "Clear day" : "Clear week")))), /*#__PURE__*/React.createElement("div", {
+  }, activeDay ? "Clear day" : "Clear week"), editMode && /*#__PURE__*/React.createElement("button", {
+    onClick: copyLastWeek,
+    style: NBTN(lightMode)
+  }, "Copy Last Week")), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: `16px ${pagePad} 0`,
       maxWidth: "1700px",
@@ -7693,7 +7725,10 @@ const handleTeamSave = (newList, newNextId) => {
       color: "#dc2626"
     },
     title: activeDay ? "Clear all schedule entries for this day" : "Clear all schedule entries for this week"
-  }, "Clear ", clearScopeNoun)), /*#__PURE__*/React.createElement("div", {
+  }, "Clear ", clearScopeNoun), editMode && !showClearConfirm && /*#__PURE__*/React.createElement("button", {
+    onClick: copyLastWeek,
+    style: NBTN(lightMode)
+  }, "Copy Last Week")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: "7px",
