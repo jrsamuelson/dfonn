@@ -3541,6 +3541,7 @@ function FloaterPicker({
   onAdd,
   compact = false
 }) {
+  const lm = useTheme();
   const t = useDesignTheme();
   const [open, setOpen] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState("");
@@ -4271,26 +4272,40 @@ function PrintView({
   }, d))), /*#__PURE__*/React.createElement("button", {
 onClick: () => {
   const content = document.getElementById("print-area").innerHTML;
-  const win = window.open("", "_blank");
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  const isWeek = printMode === "week";
+  const orientation = isWeek ? "landscape" : "portrait";
+  const fontSize = isWeek ? "8px" : "11px";
+  const cellPad = isWeek ? "3px 4px" : "5px 8px";
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #fff; }
-      table { width: 100%; border-collapse: collapse; font-size: 10px; }
-      th, td { padding: 5px 8px; border: 1px solid #e2e8f0; vertical-align: top; }
-		thead tr { background: #1e293b; color: #fff; }
-          /* Darken all muted text colors for print legibility */
-          * { color: #1e293b !important; }
-          thead tr * { color: #fff !important; }
-          [style*="color: rgb(148"] { color: #475569 !important; }
-          i, em, span[style*="italic"] { color: #334155 !important; }
-          @page { margin: 0.5cm; size: A4 landscape; }
+      body { font-family: 'Segoe UI', sans-serif; padding: 0; background: #fff; }
+      table { width: 100%; border-collapse: collapse; font-size: ${fontSize}; table-layout: fixed; }
+      th, td { padding: ${cellPad}; border: 1px solid #cbd5e1; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
+      thead tr { background: #1e293b; color: #fff; }
+      tr { page-break-inside: avoid; }
+      * { color: #1e293b !important; }
+      thead tr, thead tr * { color: #fff !important; }
+      [style*="color: rgb(148"] { color: #475569 !important; }
+      i, em, span[style*="italic"] { color: #334155 !important; }
+      @page { margin: 1cm; size: letter ${orientation}; }
+      @media print {
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      }
     </style>
-  </head><body>${content}</body></html>`);
-  win.document.close();
-  win.focus();
-  win.print();
-  win.close();
+  </head><body>${content}</body></html>`;
+  let iframe = document.getElementById("onn-print-frame");
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.id = "onn-print-frame";
+    iframe.style.cssText = "position:fixed;width:0;height:0;border:none;left:-9999px;";
+    document.body.appendChild(iframe);
+  }
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  setTimeout(() => { iframe.contentWindow.focus(); iframe.contentWindow.print(); }, 300);
 },
     style: {
       ...PRI_BTN,
