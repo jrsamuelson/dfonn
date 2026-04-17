@@ -1327,28 +1327,40 @@ const OUTLOOK_STATUS_ALIASES = [{
   exactPatterns: [/^CH$/i, /^CHESTNUT(?:\s+HILL)?$/i],
   prefixPattern: /^(?:CH|CHESTNUT(?:\s+HILL)?)\b/i,
   mentionPattern: /\b(?:CH|CHESTNUT(?:\s+HILL)?)\b/i,
-  status: STATUS.CH
+  status: STATUS.CH,
+  category: "location",
+  priority: 1
 }, {
   exactPatterns: [/^LW$/i, /^LONGWOOD$/i],
   prefixPattern: /^(?:LW|LONGWOOD)\b/i,
   mentionPattern: /\b(?:LW|LONGWOOD)\b/i,
-  status: STATUS.LW
+  status: STATUS.LW,
+  category: "location",
+  priority: 1
 }, {
   exactPatterns: [/^WFH$/i, /^REMOTE$/i, /^WORK\s+FROM\s+HOME$/i],
   prefixPattern: /^(?:WFH|REMOTE|WORK\s+FROM\s+HOME)\b/i,
   mentionPattern: /\b(?:WFH|REMOTE|WORK\s+FROM\s+HOME)\b/i,
-  status: STATUS.REMOTE
+  status: STATUS.REMOTE,
+  category: "location",
+  priority: 1
 }, {
-  exactPatterns: [/^DAY\s+OFF$/i, /^OFF$/i, /^OOO$/i, /^PTO$/i],
-  prefixPattern: /^(?:DAY\s+OFF|OFF|OOO|PTO)\b/i,
-  mentionPattern: /\b(?:DAY\s+OFF|OFF|OOO|PTO)\b/i,
-  status: STATUS.OFF
+  exactPatterns: [/^DAY\s+OFF$/i, /^OFF$/i, /^OOO$/i, /^PTO$/i, /^SICK$/i, /^HOLIDAY$/i],
+  prefixPattern: /^(?:DAY\s+OFF|OFF|OOO|PTO|SICK|HOLIDAY)\b/i,
+  mentionPattern: /\b(?:DAY\s+OFF|OFF|OOO|PTO|SICK|HOLIDAY)\b/i,
+  status: STATUS.OFF,
+  category: "away",
+  priority: 2
 }, {
-  exactPatterns: [/^VAC$/i, /^VACATION$/i],
-  prefixPattern: /^(?:VACATION|VAC)\b/i,
-  mentionPattern: /\b(?:VACATION|VAC)\b/i,
-  status: STATUS.VACATION
+  exactPatterns: [/^VAC$/i, /^VACATION$/i, /^CONFERENCE$/i, /^CONF$/i, /^TRAINING$/i, /^JURY(?:\s+DUTY)?$/i],
+  prefixPattern: /^(?:VACATION|VAC|CONFERENCE|CONF|TRAINING|JURY(?:\s+DUTY)?)\b/i,
+  mentionPattern: /\b(?:VACATION|VAC|CONFERENCE|CONF|TRAINING|JURY(?:\s+DUTY)?)\b/i,
+  status: STATUS.VACATION,
+  category: "away",
+  priority: 3
 }];
+// Status keywords for concatenated-name detection (e.g. "ArynOFF") and non-team filter.
+const OUTLOOK_STATUS_KEYWORD_SRC = "CH|LW|WFH|OFF|OOO|PTO|VAC|VACATION|REMOTE|SICK|HOLIDAY|CONF|CONFERENCE|TRAINING|JURY|DAY\\s+OFF";
 const OUTLOOK_NAME_ALIASES = {
   Ivonne: ["Ivone"]
 };
@@ -1492,8 +1504,14 @@ function matchOutlookNameInText(text, nameVariant) {
   const trimmedVariant = String(nameVariant || "").trim();
   if (!text || !trimmedVariant) return null;
   const escaped = escapeRegExp(trimmedVariant).replace(/\s+/g, "\\s+");
-  const pattern = new RegExp(`(^|[^A-Za-z0-9])(${escaped})(?=$|[^A-Za-z0-9])`, "i");
-  const match = text.match(pattern);
+  // Primary: standard word-boundary match.
+  let pattern = new RegExp(`(^|[^A-Za-z0-9])(${escaped})(?=$|[^A-Za-z0-9])`, "i");
+  let match = text.match(pattern);
+  if (!match) {
+    // Secondary: name concatenated with a status keyword (e.g. "ArynOFF", "KathyWFH").
+    pattern = new RegExp(`(^|[^A-Za-z0-9])(${escaped})(?=(?:${OUTLOOK_STATUS_KEYWORD_SRC})\\b)`, "i");
+    match = text.match(pattern);
+  }
   if (!match) return null;
   const prefixLength = String(match[1] || "").length;
   const matchedText = String(match[2] || trimmedVariant);
@@ -1515,45 +1533,96 @@ function parseOutlookStatusFromText(rawText) {
   const mentionedStatuses = Array.from(new Set(getOutlookStatusMentions(cleaned)));
   return mentionedStatuses.length === 1 ? mentionedStatuses[0] : null;
 }
-function parseOutlookCalendarSummary(summary, teamList) {
+// Clean residual free-text (trim separators/whitespace) to produce a human note.
+function cleanOutlookNoteText(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\-:/|,]+/, "")
+    .replace(/[\s\-:/|,]+$/, "")
+    .trim();
+}
+// Resolve the chosen status alias from remainder text using priority.
+// Priority: VACATION (3) > OFF (2) > location CH/LW/REMOTE (1).
+// On ties within a category, earlier-in-text wins.
+function pickOutlookStatusAlias(remainder) {
+  const mentions = [];
+  for (const opt of OUTLOOK_STATUS_ALIASES) {
+    const m = remainder.match(opt.mentionPattern);
+    if (m) mentions.push({ alias: opt, index: m.index || 0 });
+  }
+  if (mentions.length === 0) return { alias: null, mentions };
+  mentions.sort((a, b) => {
+    if (a.alias.priority !== b.alias.priority) return b.alias.priority - a.alias.priority;
+    return a.index - b.index;
+  });
+  return { alias: mentions[0].alias, mentions };
+}
+// Rich classifier: returns { kind, onn?, status?, note?, matches?, text? }
+// kind is one of: "parsed", "no_status", "no_name_match", "ambiguous_name", "empty"
+function parseOutlookMessage(summary, teamList) {
   const cleaned = trimOutlookSummaryText(summary);
-  if (!cleaned) return null;
+  if (!cleaned) return { kind: "empty" };
   const candidates = [];
   for (const onn of teamList || []) {
     for (const nameVariant of getOutlookNameVariants(onn)) {
-      candidates.push({
-        onn,
-        nameVariant
-      });
+      candidates.push({ onn, nameVariant });
     }
   }
   candidates.sort((a, b) => b.nameVariant.length - a.nameVariant.length);
   const matchesByOnnId = new Map();
   for (const candidate of candidates) {
     if (!candidate.nameVariant) continue;
+    const key = String(candidate.onn?.id);
+    if (matchesByOnnId.has(key)) continue;
     const nameMatch = matchOutlookNameInText(cleaned, candidate.nameVariant);
     if (!nameMatch) continue;
-    const rawStatus = `${cleaned.slice(0, nameMatch.start)} ${cleaned.slice(nameMatch.end)}`.replace(/\s+/g, " ").trim();
-    const status = parseOutlookStatusFromText(rawStatus);
-    if (!status) continue;
-    const key = String(candidate.onn?.id);
-    const prev = matchesByOnnId.get(key);
-    if (!prev || candidate.nameVariant.length > prev.nameVariant.length) {
-      matchesByOnnId.set(key, {
-        onn: candidate.onn,
-        status,
-        rawStatus: rawStatus.trim(),
-        nameVariant: candidate.nameVariant
-      });
+    matchesByOnnId.set(key, { onn: candidate.onn, nameMatch, nameVariant: candidate.nameVariant });
+  }
+  if (matchesByOnnId.size === 0) {
+    return { kind: "no_name_match", text: cleaned };
+  }
+  // Pick the earliest-appearing name as primary. Secondary mentions (e.g. "Jane covering")
+  // stay in the remainder and become part of the note.
+  const sorted = Array.from(matchesByOnnId.values()).sort((a, b) => a.nameMatch.start - b.nameMatch.start);
+  const m = sorted[0];
+  const ambiguousNames = sorted.length > 1 ? sorted.slice(1).map(x => x.onn) : [];
+  // Remainder text after stripping the primary name occurrence.
+  const remainderRaw = (cleaned.slice(0, m.nameMatch.start) + " " + cleaned.slice(m.nameMatch.end))
+    .replace(/[_/|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const { alias, mentions } = pickOutlookStatusAlias(remainderRaw);
+  if (!alias) {
+    return { kind: "no_status", onn: m.onn, note: cleanOutlookNoteText(remainderRaw), text: cleaned, ambiguousNames };
+  }
+  // Build note: remove the chosen status mention from the remainder.
+  let note = remainderRaw.replace(alias.mentionPattern, " ");
+  const isSplitDay = mentions.filter(x => x.alias.category === "location").length > 1;
+  // For split-day cases (CH/LW), KEEP the other location visible in the note.
+  // For cross-category multi-status (OFF vacation), the extra word is redundant noise - strip it.
+  if (!isSplitDay) {
+    for (const other of mentions) {
+      if (other.alias !== alias) note = note.replace(other.alias.mentionPattern, " ");
     }
   }
-  if (matchesByOnnId.size !== 1) return null;
-  const match = Array.from(matchesByOnnId.values())[0];
-  return {
-    onn: match.onn,
-    status: match.status,
-    rawStatus: match.rawStatus
+  note = cleanOutlookNoteText(note);
+  if (!isSplitDay) {
+    const statusStripRe = new RegExp(`\\b(?:${OUTLOOK_STATUS_KEYWORD_SRC})\\b`, "gi");
+    const residue = note.replace(statusStripRe, "").replace(/[\s\-:/|,()]+/g, "");
+    if (!residue) note = "";
+  }
+  const flags = {
+    splitDay: isSplitDay,
+    multiStatus: mentions.length > 1,
+    ambiguousNames
   };
+  return { kind: "parsed", onn: m.onn, status: alias.status, note, flags, text: cleaned, rawStatus: remainderRaw };
+}
+// Backward-compatible wrapper (returns { onn, status, rawStatus } or null).
+function parseOutlookCalendarSummary(summary, teamList) {
+  const r = parseOutlookMessage(summary, teamList);
+  if (!r || r.kind !== "parsed") return null;
+  return { onn: r.onn, status: r.status, rawStatus: r.rawStatus || "", note: r.note || "", flags: r.flags || {} };
 }
 function parseCsvRecords(text) {
   const input = String(text || "").replace(/^\uFEFF/, "");
@@ -1696,14 +1765,25 @@ function formatOutlookSkippedEventSamples(samples, totalCount = 0, maxShown = 3)
   const rendered = shown.map(sample => `"${sample}"`).join(", ");
   return hiddenCount > 0 ? `${rendered}, plus ${hiddenCount} more` : rendered;
 }
+// Merge a new note fragment into an existing slot note without duplicating.
+function mergeOutlookNote(existing, incoming) {
+  const ex = String(existing || "").trim();
+  const inc = String(incoming || "").trim();
+  if (!inc) return ex;
+  if (!ex) return inc;
+  // Don't add duplicate substrings.
+  if (ex.toLowerCase().includes(inc.toLowerCase())) return ex;
+  return `${ex} \u00b7 ${inc}`;
+}
 async function applyOutlookImportEntries(entries, teamList) {
   if (!Array.isArray(teamList) || teamList.length === 0) {
     throw new Error("Team list is not available for calendar import.");
   }
   const normalizedEntries = Array.isArray(entries) ? entries : [];
   const weeksToSave = new Map();
-  const skippedEvents = [];
+  const skippedEvents = [];          // name-matched but unparseable (actionable warnings)
   const skippedEventSamples = [];
+  const nonTeamEventsSkipped = [];   // no name match at all (silent; just counted)
   const appliedSlotKeys = new Set();
   let importedEvents = 0;
   let importedDays = 0;
@@ -1711,18 +1791,27 @@ async function applyOutlookImportEntries(entries, teamList) {
   let duplicateDaysSkipped = 0;
   for (const entry of normalizedEntries) {
     const summary = trimOutlookSummaryText(entry?.summary || "");
-    const parsed = parseOutlookCalendarSummary(summary, teamList);
     const dates = Array.isArray(entry?.dates) ? entry.dates.filter(date => date instanceof Date && !Number.isNaN(date.getTime())) : [];
-    if (!parsed || dates.length === 0) {
-      if (summary) {
-        skippedEvents.push(summary);
-        collectOutlookSkippedEventSample(skippedEventSamples, summary);
-      }
+    const msg = parseOutlookMessage(summary, teamList);
+    if (!summary || dates.length === 0) continue;
+    if (msg.kind === "no_name_match" || msg.kind === "empty") {
+      nonTeamEventsSkipped.push(summary);
       continue;
     }
+    if (msg.kind === "ambiguous_name" || (msg.kind === "no_status" && !msg.note)) {
+      skippedEvents.push(summary);
+      collectOutlookSkippedEventSample(skippedEventSamples, summary);
+      continue;
+    }
+    // msg.kind is "parsed" or "no_status" (with a note)
+    const hasStatus = msg.kind === "parsed";
+    const status = hasStatus ? msg.status : null;
+    const note = msg.note || "";
     let appliedThisEvent = false;
     const lastDate = dates[dates.length - 1];
-    const returnDate = parsed.status === STATUS.VACATION ? toISODateString(new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate() + 1)) : "";
+    const returnDate = hasStatus && status === STATUS.VACATION
+      ? toISODateString(new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate() + 1))
+      : "";
     for (const date of dates) {
       const dayName = getDayNameForDate(date);
       if (!dayName) {
@@ -1731,7 +1820,7 @@ async function applyOutlookImportEntries(entries, teamList) {
       }
       const weekStart = getWeekStartForDate(date);
       const weekKey = skey(weekStart);
-      const slotKey = `${weekKey}|${dayName}|${parsed.onn.id}|${parsed.status}|${returnDate}`;
+      const slotKey = `${weekKey}|${dayName}|${msg.onn.id}|${status || "NOTE"}|${returnDate}|${note}`;
       if (appliedSlotKeys.has(slotKey)) {
         duplicateDaysSkipped += 1;
         continue;
@@ -1743,25 +1832,23 @@ async function applyOutlookImportEntries(entries, teamList) {
         weekData = loaded?.data && typeof loaded.data === "object" ? loaded.data : syncWeekDataToTeam(buildDefault(teamList), teamList);
         weeksToSave.set(weekKey, weekData);
       }
-      const dayData = weekData[dayName] || {
-        notes: "",
-        holiday: false,
-        staff: {}
-      };
-      const slot = getSlot(dayData, parsed.onn.id);
-      weekData[dayName] = {
-        ...dayData,
-        staff: {
-          ...(dayData.staff || {}),
-          [parsed.onn.id]: {
+      const dayData = weekData[dayName] || { notes: "", holiday: false, staff: {} };
+      const slot = getSlot(dayData, msg.onn.id);
+      const mergedNote = note ? mergeOutlookNote(slot.note, note) : (slot.note || "");
+      const nextSlot = hasStatus
+        ? {
             ...slot,
-            status: parsed.status,
+            status,
             cov1: "",
             cov2: "",
-            docCoverage: isAway(parsed.status) ? slot.docCoverage || {} : {},
-            returnDate: parsed.status === STATUS.VACATION ? returnDate : ""
+            docCoverage: isAway(status) ? slot.docCoverage || {} : {},
+            returnDate: status === STATUS.VACATION ? returnDate : "",
+            note: mergedNote
           }
-        }
+        : { ...slot, note: mergedNote };
+      weekData[dayName] = {
+        ...dayData,
+        staff: { ...(dayData.staff || {}), [msg.onn.id]: nextSlot }
       };
       importedDays += 1;
       appliedThisEvent = true;
@@ -1781,6 +1868,7 @@ async function applyOutlookImportEntries(entries, teamList) {
     duplicateDaysSkipped,
     skippedEvents,
     skippedEventSamples,
+    nonTeamEventsSkipped: nonTeamEventsSkipped.length,
     updatedWeeks: Array.from(weeksToSave.keys()).sort()
   };
 }
@@ -5964,13 +6052,15 @@ function SettingsModal({
       }
       if (result.importedEvents === 0) {
         const sampleLabel = result.skippedEventSamples.length > 0 ? ` Examples: ${formatOutlookSkippedEventSamples(result.skippedEventSamples, result.skippedEvents.length)}.` : "";
-        setIcsFeedback(`No matching ONN events were imported. Check that event titles include one current ONN name plus CH, LW, WFH, Off, or Vacation.${sampleLabel}`);
+        const nonTeamLabel = result.nonTeamEventsSkipped > 0 ? ` Ignored ${result.nonTeamEventsSkipped} non-ONN event${result.nonTeamEventsSkipped === 1 ? "" : "s"} (meetings, seminars, etc.).` : "";
+        setIcsFeedback(`No matching ONN events were imported. Check that event titles include one current ONN name plus CH, LW, WFH, Off, Vacation, Conference, Training, Jury, Holiday, or Sick.${sampleLabel}${nonTeamLabel}`);
         setIcsFeedbackTone("error");
       } else {
-        const skippedLabel = result.skippedEvents.length > 0 ? ` Skipped ${result.skippedEvents.length} event${result.skippedEvents.length === 1 ? "" : "s"} that did not clearly map to one ONN and one status.${result.skippedEventSamples.length > 0 ? ` Examples: ${formatOutlookSkippedEventSamples(result.skippedEventSamples, result.skippedEvents.length)}.` : ""}` : "";
+        const skippedLabel = result.skippedEvents.length > 0 ? ` Skipped ${result.skippedEvents.length} event${result.skippedEvents.length === 1 ? "" : "s"} that did not clearly map to one ONN.${result.skippedEventSamples.length > 0 ? ` Examples: ${formatOutlookSkippedEventSamples(result.skippedEventSamples, result.skippedEvents.length)}.` : ""}` : "";
         const duplicateLabel = result.duplicateDaysSkipped > 0 ? ` Ignored ${result.duplicateDaysSkipped} duplicate day import${result.duplicateDaysSkipped === 1 ? "" : "s"} already represented in the file.` : "";
         const weekendLabel = result.weekendDaysSkipped > 0 ? ` Ignored ${result.weekendDaysSkipped} weekend day${result.weekendDaysSkipped === 1 ? "" : "s"}.` : "";
-        setIcsFeedback(`Imported ${result.importedEvents} event${result.importedEvents === 1 ? "" : "s"} into ${result.updatedWeeks.length} week${result.updatedWeeks.length === 1 ? "" : "s"} and updated ${result.importedDays} weekday slot${result.importedDays === 1 ? "" : "s"}.${skippedLabel}${duplicateLabel}${weekendLabel}`);
+        const nonTeamLabel = result.nonTeamEventsSkipped > 0 ? ` Filtered ${result.nonTeamEventsSkipped} non-ONN event${result.nonTeamEventsSkipped === 1 ? "" : "s"} (meetings, seminars, etc.).` : "";
+        setIcsFeedback(`Imported ${result.importedEvents} event${result.importedEvents === 1 ? "" : "s"} into ${result.updatedWeeks.length} week${result.updatedWeeks.length === 1 ? "" : "s"} and updated ${result.importedDays} weekday slot${result.importedDays === 1 ? "" : "s"}. Notes like "(Jane covering)" are merged into the day's note field.${skippedLabel}${duplicateLabel}${weekendLabel}${nonTeamLabel}`);
         setIcsFeedbackTone(result.skippedEvents.length > 0 || result.duplicateDaysSkipped > 0 ? "warn" : "success");
       }
     } catch (err) {
