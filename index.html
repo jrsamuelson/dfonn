@@ -1902,6 +1902,154 @@ async function importOutlookCalendarIcsText(text, teamList) {
     dates: getIcsEventDates(event)
   })), teamList);
 }
+// -- Preview-based import (Commit B) --
+// Build a preview structure the UI can display/edit before committing any writes.
+// Each preview "entry" is one (ONN, date) pair; multi-day events get expanded.
+function buildOutlookPreviewEntries(rawEvents, teamList) {
+  const normalized = Array.isArray(rawEvents) ? rawEvents : [];
+  const entries = [];
+  const nonTeamEvents = []; // one per source event (not expanded)
+  let weekendDaysSkipped = 0;
+  let id = 0;
+  for (const ev of normalized) {
+    const summary = trimOutlookSummaryText(ev?.summary || "");
+    const dates = Array.isArray(ev?.dates)
+      ? ev.dates.filter(d => d instanceof Date && !Number.isNaN(d.getTime()))
+      : [];
+    if (!summary || dates.length === 0) continue;
+    const msg = parseOutlookMessage(summary, teamList);
+    if (msg.kind === "no_name_match" || msg.kind === "empty") {
+      nonTeamEvents.push({
+        id: `n${id++}`,
+        source: summary,
+        sourceDateStr: dates[0].toLocaleDateString(),
+        dates: dates.slice()
+      });
+      continue;
+    }
+    // parsed or no_status: expand per weekday
+    const lastDate = dates[dates.length - 1];
+    const vacationReturnDate = msg.kind === "parsed" && msg.status === STATUS.VACATION
+      ? toISODateString(new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate() + 1))
+      : "";
+    for (const d of dates) {
+      const dayName = getDayNameForDate(d);
+      if (!dayName) { weekendDaysSkipped += 1; continue; }
+      const needsReview = msg.kind === "no_status"
+        || !!(msg.flags && (msg.flags.splitDay || msg.flags.multiStatus));
+      entries.push({
+        id: `e${id++}`,
+        source: summary,
+        sourceDateStr: d.toLocaleDateString(),
+        date: d,
+        dayName,
+        weekStart: getWeekStartForDate(d),
+        onnId: msg.onn.id,
+        onnName: msg.onn.name,
+        status: msg.status || null,
+        note: msg.note || "",
+        flags: msg.flags || {},
+        vacationReturnDate,
+        bucket: needsReview ? "review" : "ready",
+        enabled: true
+      });
+    }
+  }
+  return {
+    entries,
+    nonTeamEvents,
+    weekendDaysSkipped,
+    totalEvents: normalized.length
+  };
+}
+
+// Build a preview from a file (dispatches between CSV and ICS parsers).
+function buildOutlookImportPreview(file, text, teamList) {
+  const fileName = String(file?.name || "").toLowerCase();
+  const trimmedText = String(text || "").trim();
+  let rawEvents = [];
+  const asCsv = () => parseCsvRecords(trimmedText).map(rec => ({
+    summary: getOutlookCsvValue(rec, ["Subject", "Title"]),
+    dates: getOutlookCsvEventDates(rec)
+  }));
+  const asIcs = () => parseIcsEvents(trimmedText).map(ev => ({
+    summary: getIcsField(ev, "SUMMARY")?.value || "",
+    dates: getIcsEventDates(ev)
+  }));
+  if (fileName.endsWith(".csv")) {
+    rawEvents = asCsv();
+  } else if (fileName.endsWith(".ics") || /^BEGIN:VCALENDAR/i.test(trimmedText)) {
+    rawEvents = asIcs();
+  } else {
+    const probe = parseCsvRecords(trimmedText);
+    const looksCsv = probe.length > 0 && Object.keys(probe[0] || {}).some(k => {
+      const n = normalizeOutlookCsvColumnName(k);
+      return n === "subject" || n === "title";
+    });
+    rawEvents = looksCsv ? asCsv() : asIcs();
+  }
+  return buildOutlookPreviewEntries(rawEvents, teamList);
+}
+
+// Apply an array of preview entries (already reviewed/edited by the user).
+async function applyOutlookPreviewEntries(entries, teamList) {
+  if (!Array.isArray(teamList) || teamList.length === 0) {
+    throw new Error("Team list is not available for calendar import.");
+  }
+  const active = (Array.isArray(entries) ? entries : []).filter(e => {
+    if (!e || !e.enabled) return false;
+    if (!e.onnId || !e.dayName || !e.weekStart) return false;
+    // Entry needs either a status or a note to be meaningful.
+    return !!e.status || !!(e.note && String(e.note).trim());
+  });
+  const weeksToSave = new Map();
+  const appliedKeys = new Set();
+  let importedDays = 0;
+  let duplicateDaysSkipped = 0;
+  for (const e of active) {
+    const weekKey = skey(e.weekStart);
+    const slotKey = `${weekKey}|${e.dayName}|${e.onnId}|${e.status || "NOTE"}|${e.vacationReturnDate || ""}|${e.note || ""}`;
+    if (appliedKeys.has(slotKey)) { duplicateDaysSkipped += 1; continue; }
+    appliedKeys.add(slotKey);
+    let weekData = weeksToSave.get(weekKey);
+    if (!weekData) {
+      const loaded = await loadWeekWithCarryover(e.weekStart, teamList);
+      weekData = loaded?.data && typeof loaded.data === "object"
+        ? loaded.data
+        : syncWeekDataToTeam(buildDefault(teamList), teamList);
+      weeksToSave.set(weekKey, weekData);
+    }
+    const dayData = weekData[e.dayName] || { notes: "", holiday: false, staff: {} };
+    const slot = getSlot(dayData, e.onnId);
+    const mergedNote = e.note ? mergeOutlookNote(slot.note, e.note) : (slot.note || "");
+    const hasStatus = !!e.status;
+    const nextSlot = hasStatus ? {
+      ...slot,
+      status: e.status,
+      cov1: "",
+      cov2: "",
+      docCoverage: isAway(e.status) ? slot.docCoverage || {} : {},
+      returnDate: e.status === STATUS.VACATION ? (e.vacationReturnDate || "") : "",
+      note: mergedNote
+    } : { ...slot, note: mergedNote };
+    weekData[e.dayName] = {
+      ...dayData,
+      staff: { ...(dayData.staff || {}), [e.onnId]: nextSlot }
+    };
+    importedDays += 1;
+  }
+  for (const [weekKey, wd] of weeksToSave.entries()) {
+    const ws = parseDateAtStartOfDay(weekKey.slice("onn_week5_".length));
+    if (!ws) continue;
+    await saveWeek(ws, wd);
+  }
+  return {
+    importedDays,
+    duplicateDaysSkipped,
+    updatedWeeks: Array.from(weeksToSave.keys()).sort()
+  };
+}
+
 async function importOutlookCalendarFileText(file, text, teamList) {
   const fileName = String(file?.name || "").toLowerCase();
   const trimmedText = String(text || "").trim();
@@ -5950,6 +6098,199 @@ const addOnn = () => {
     }
   }, "Save")));
 }
+function OutlookImportPreview({
+  preview,
+  teamList,
+  fileName,
+  busy,
+  onApply,
+  onCancel
+}) {
+  const lm = useTheme();
+  const t = useDesignTheme();
+  const [entries, setEntries] = React.useState(() => (preview?.entries || []).map(e => ({ ...e })));
+  const [expandReady, setExpandReady] = React.useState(true);
+  const [expandReview, setExpandReview] = React.useState(true);
+  const [expandNonTeam, setExpandNonTeam] = React.useState(false);
+  const readyEntries = entries.filter(e => e.bucket === "ready");
+  const reviewEntries = entries.filter(e => e.bucket === "review");
+  const nonTeamEvents = preview?.nonTeamEvents || [];
+  const enabledCount = entries.filter(e => e.enabled && (e.status || (e.note && e.note.trim()))).length;
+  const weekendDaysSkipped = preview?.weekendDaysSkipped || 0;
+  const totalEvents = preview?.totalEvents || 0;
+
+  const setEntryField = (id, field, value) => {
+    setEntries(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
+  };
+  const toggleAllInBucket = (bucket, next) => {
+    setEntries(prev => prev.map(e => e.bucket === bucket ? { ...e, enabled: next } : e));
+  };
+
+  const statusOptions = [
+    { value: "", label: "\u2014 skip \u2014" },
+    { value: STATUS.CH, label: "CH" },
+    { value: STATUS.LW, label: "LW" },
+    { value: STATUS.REMOTE, label: "WFH" },
+    { value: STATUS.OFF, label: "Off" },
+    { value: STATUS.VACATION, label: "Vacation" }
+  ];
+
+  const renderEntryRow = (e) => /*#__PURE__*/React.createElement("tr", {
+    key: e.id,
+    style: { background: e.enabled ? "transparent" : (lm ? "#f8fafc" : "rgba(15,23,42,0.4)"), opacity: e.enabled ? 1 : 0.55 }
+  }, /*#__PURE__*/React.createElement("td", {
+    style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}`, verticalAlign: "middle" }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!e.enabled,
+    onChange: ev => setEntryField(e.id, "enabled", ev.target.checked),
+    style: { cursor: "pointer" }
+  })), /*#__PURE__*/React.createElement("td", {
+    style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}`, whiteSpace: "nowrap", fontSize: "11px", color: t.textMuted }
+  }, e.sourceDateStr, " ", /*#__PURE__*/React.createElement("span", { style: { color: t.textSoft } }, "(" + e.dayName.slice(0, 3) + ")")), /*#__PURE__*/React.createElement("td", {
+    style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}`, fontWeight: 600, fontSize: "12px", whiteSpace: "nowrap" }
+  }, e.onnName), /*#__PURE__*/React.createElement("td", {
+    style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}` }
+  }, /*#__PURE__*/React.createElement("select", {
+    value: e.status || "",
+    onChange: ev => setEntryField(e.id, "status", ev.target.value || null),
+    style: {
+      padding: "3px 6px", borderRadius: "6px",
+      border: `1px solid ${t.panelBorder}`, background: t.panelBg,
+      color: t.textMain, fontFamily: "inherit", fontSize: "11px"
+    }
+  }, statusOptions.map(opt => /*#__PURE__*/React.createElement("option", { key: opt.value, value: opt.value }, opt.label)))), /*#__PURE__*/React.createElement("td", {
+    style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}`, width: "100%" }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: e.note || "",
+    placeholder: "(no note)",
+    onChange: ev => setEntryField(e.id, "note", ev.target.value),
+    style: {
+      width: "100%", padding: "3px 6px", borderRadius: "6px",
+      border: `1px solid ${t.panelBorder}`, background: t.panelBg,
+      color: t.textMain, fontFamily: "inherit", fontSize: "11px"
+    }
+  })), /*#__PURE__*/React.createElement("td", {
+    style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}`, fontSize: "10px", color: t.textSoft, fontStyle: "italic", maxWidth: "260px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+    title: e.source
+  }, e.source), (e.flags && (e.flags.splitDay || e.flags.multiStatus)) ? /*#__PURE__*/React.createElement("td", {
+    style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}`, fontSize: "10px" }
+  }, e.flags.splitDay ? /*#__PURE__*/React.createElement("span", { style: { padding: "1px 6px", borderRadius: "6px", background: "#fef3c7", color: "#92400e", marginRight: "4px" } }, "split") : null, e.flags.multiStatus ? /*#__PURE__*/React.createElement("span", { style: { padding: "1px 6px", borderRadius: "6px", background: "#fef3c7", color: "#92400e" } }, "multi") : null) : /*#__PURE__*/React.createElement("td", { style: { padding: "6px 8px", borderBottom: `1px solid ${t.panelBorder}` } }));
+
+  const sectionHeader = (title, count, expanded, onToggle, toneBg, toneText) => /*#__PURE__*/React.createElement("div", {
+    onClick: onToggle,
+    style: {
+      cursor: "pointer", padding: "10px 12px", background: toneBg,
+      color: toneText, borderRadius: "8px", display: "flex",
+      alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700,
+      marginTop: "12px", userSelect: "none"
+    }
+  }, /*#__PURE__*/React.createElement("span", { style: { fontSize: "11px" } }, expanded ? "\u25bc" : "\u25b6"), title, /*#__PURE__*/React.createElement("span", { style: { marginLeft: "auto", fontSize: "12px", fontWeight: 600, opacity: 0.8 } }, count));
+
+  const tableWrap = (rows) => /*#__PURE__*/React.createElement("div", {
+    style: { marginTop: "8px", overflowX: "auto", border: `1px solid ${t.panelBorder}`, borderRadius: "8px" }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: { borderCollapse: "collapse", width: "100%", fontSize: "12px" }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+    style: { background: t.panelAlt || t.panelBg }
+  }, ["", "Date", "ONN", "Status", "Note", "Source", ""].map((h, i) => /*#__PURE__*/React.createElement("th", {
+    key: i,
+    style: { padding: "8px", textAlign: "left", borderBottom: `1px solid ${t.panelBorder}`, fontSize: "11px", fontWeight: 700, color: t.textMuted }
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, rows.map(renderEntryRow))));
+
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed", inset: 0, zIndex: 350,
+      background: "rgba(0,0,0,0.75)", display: "flex",
+      alignItems: "flex-start", justifyContent: "center",
+      padding: "24px", overflowY: "auto"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: t.modalBg || t.panelBg, color: t.textMain,
+      borderRadius: "16px", width: "100%", maxWidth: "1100px",
+      boxShadow: "0 16px 60px rgba(0,0,0,0.35)",
+      display: "flex", flexDirection: "column"
+    }
+  },
+  /*#__PURE__*/React.createElement("div", {
+    style: { padding: "18px 22px", borderBottom: `1px solid ${t.panelBorder}` }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: "17px", fontWeight: 800 }
+  }, "Review Outlook import"), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: "12px", color: t.textMuted, marginTop: "4px" }
+  }, fileName ? `${fileName} \u2022 ` : "", totalEvents, " source events \u2022 ", entries.length, " day-slots parsed \u2022 ", nonTeamEvents.length, " filtered as non-ONN", weekendDaysSkipped > 0 ? ` \u2022 ${weekendDaysSkipped} weekend day${weekendDaysSkipped === 1 ? "" : "s"} skipped` : ""), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: "12px", color: t.textSoft, marginTop: "6px" }
+  }, "Uncheck rows to skip them. Override the status dropdown or edit the note inline. Click Apply to write the enabled rows to your schedule.")),
+
+  /*#__PURE__*/React.createElement("div", {
+    style: { padding: "4px 22px 22px", overflowY: "auto", maxHeight: "70vh" }
+  },
+    // READY bucket
+    sectionHeader(`Ready (${readyEntries.length})`, readyEntries.filter(e=>e.enabled).length + " enabled", expandReady, () => setExpandReady(v => !v), lm ? "#dcfce7" : "rgba(34,197,94,0.16)", lm ? "#14532d" : "#bbf7d0"),
+    expandReady && readyEntries.length > 0 ? /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: "6px", fontSize: "11px", marginTop: "4px" } },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => toggleAllInBucket("ready", true),
+          style: { ...NBTN(lm), fontSize: "11px", padding: "3px 8px" }
+        }, "Enable all"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => toggleAllInBucket("ready", false),
+          style: { ...NBTN(lm), fontSize: "11px", padding: "3px 8px" }
+        }, "Disable all")),
+      tableWrap(readyEntries)) : null,
+
+    // REVIEW bucket
+    sectionHeader(`Needs review (${reviewEntries.length})`, reviewEntries.filter(e=>e.enabled).length + " enabled", expandReview, () => setExpandReview(v => !v), lm ? "#fef3c7" : "rgba(251,191,36,0.16)", lm ? "#78350f" : "#fde68a"),
+    expandReview && reviewEntries.length > 0 ? /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: "11px", color: t.textMuted, marginTop: "6px", padding: "0 4px" } }, "These rows were parsed but flagged as unusual (split-day, missing status, or extra names). Review the status/note before enabling."),
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: "6px", fontSize: "11px", marginTop: "4px" } },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => toggleAllInBucket("review", true),
+          style: { ...NBTN(lm), fontSize: "11px", padding: "3px 8px" }
+        }, "Enable all"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => toggleAllInBucket("review", false),
+          style: { ...NBTN(lm), fontSize: "11px", padding: "3px 8px" }
+        }, "Disable all")),
+      tableWrap(reviewEntries)) : null,
+
+    // NON-TEAM
+    sectionHeader(`Filtered as non-ONN (${nonTeamEvents.length})`, "silenced", expandNonTeam, () => setExpandNonTeam(v => !v), lm ? "#e2e8f0" : "rgba(148,163,184,0.16)", lm ? "#334155" : "#cbd5e1"),
+    expandNonTeam && nonTeamEvents.length > 0 ? /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: "8px", fontSize: "11px", color: t.textMuted, padding: "8px 12px", background: lm ? "#f8fafc" : "rgba(15,23,42,0.3)", borderRadius: "8px", maxHeight: "200px", overflowY: "auto" }
+    }, nonTeamEvents.map(ev => /*#__PURE__*/React.createElement("div", {
+      key: ev.id,
+      style: { padding: "3px 0", borderBottom: `1px dashed ${t.panelBorder}` }
+    }, ev.sourceDateStr, " \u2014 ", ev.source))) : null),
+
+  /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "14px 22px", borderTop: `1px solid ${t.panelBorder}`,
+      display: "flex", alignItems: "center", gap: "10px",
+      justifyContent: "space-between", flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: "12px", color: t.textMuted }
+  }, enabledCount, " row", enabledCount === 1 ? "" : "s", " will be written"), /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: "8px" }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: onCancel,
+    disabled: busy,
+    style: { ...NBTN(lm), fontSize: "13px", padding: "8px 18px", cursor: busy ? "default" : "pointer" }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => onApply(entries),
+    disabled: busy || enabledCount === 0,
+    style: {
+      padding: "8px 20px", borderRadius: "9px", border: "none",
+      background: (busy || enabledCount === 0) ? t.panelBorder : "#4f46e5",
+      color: (busy || enabledCount === 0) ? t.textSoft : "#ffffff",
+      fontFamily: "inherit", fontSize: "13px", fontWeight: 700,
+      cursor: (busy || enabledCount === 0) ? "default" : "pointer"
+    }
+  }, busy ? "Applying\u2026" : `Apply ${enabledCount} row${enabledCount === 1 ? "" : "s"}`)))));
+}
 function SettingsModal({
   onns,
   onSave,
@@ -5985,6 +6326,9 @@ function SettingsModal({
   const [signingOut, setSigningOut] = React.useState(false);
   const [icsFeedback, setIcsFeedback] = React.useState("");
   const [icsFeedbackTone, setIcsFeedbackTone] = React.useState("neutral");
+  const [previewData, setPreviewData] = React.useState(null);
+  const [previewFileName, setPreviewFileName] = React.useState("");
+  const [previewBusy, setPreviewBusy] = React.useState(false);
   const [resetConfirm, setResetConfirm] = React.useState(false);
   const [prefLightMode, setPrefLightMode] = React.useState(lightMode);
   const [prefTextSize, setPrefTextSize] = React.useState(textSize);
@@ -6052,41 +6396,51 @@ function SettingsModal({
   const handleImportIcsFile = async e => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    const confirmed = window.confirm("Importing this Outlook calendar export will update matching ONN weekday statuses in saved schedules. Continue?");
-    if (!confirmed) {
-      e.target.value = "";
-      return;
-    }
     setImportingIcs(true);
     setIcsFeedback("");
     setIcsFeedbackTone("neutral");
     try {
       const text = await file.text();
-      const result = await importOutlookCalendarFileText(file, text, teamList);
-      if (typeof onIcsImport === "function") {
-        await onIcsImport(result);
-      }
-      if (result.importedEvents === 0) {
-        const sampleLabel = result.skippedEventSamples.length > 0 ? ` Examples: ${formatOutlookSkippedEventSamples(result.skippedEventSamples, result.skippedEvents.length)}.` : "";
-        const nonTeamLabel = result.nonTeamEventsSkipped > 0 ? ` Ignored ${result.nonTeamEventsSkipped} non-ONN event${result.nonTeamEventsSkipped === 1 ? "" : "s"} (meetings, seminars, etc.).` : "";
-        setIcsFeedback(`No matching ONN events were imported. Check that event titles include one current ONN name plus CH, LW, WFH, Off, Vacation, Conference, Training, Jury, Holiday, or Sick.${sampleLabel}${nonTeamLabel}`);
+      const preview = buildOutlookImportPreview(file, text, teamList);
+      if ((!preview.entries || preview.entries.length === 0) && (!preview.nonTeamEvents || preview.nonTeamEvents.length === 0)) {
+        setIcsFeedback("No parseable events found in the file. Check that event titles include an ONN name plus a status word like CH, LW, WFH, Off, Vacation, Conference, Training, Jury, Holiday, or Sick.");
         setIcsFeedbackTone("error");
       } else {
-        const skippedLabel = result.skippedEvents.length > 0 ? ` Skipped ${result.skippedEvents.length} event${result.skippedEvents.length === 1 ? "" : "s"} that did not clearly map to one ONN.${result.skippedEventSamples.length > 0 ? ` Examples: ${formatOutlookSkippedEventSamples(result.skippedEventSamples, result.skippedEvents.length)}.` : ""}` : "";
-        const duplicateLabel = result.duplicateDaysSkipped > 0 ? ` Ignored ${result.duplicateDaysSkipped} duplicate day import${result.duplicateDaysSkipped === 1 ? "" : "s"} already represented in the file.` : "";
-        const weekendLabel = result.weekendDaysSkipped > 0 ? ` Ignored ${result.weekendDaysSkipped} weekend day${result.weekendDaysSkipped === 1 ? "" : "s"}.` : "";
-        const nonTeamLabel = result.nonTeamEventsSkipped > 0 ? ` Filtered ${result.nonTeamEventsSkipped} non-ONN event${result.nonTeamEventsSkipped === 1 ? "" : "s"} (meetings, seminars, etc.).` : "";
-        setIcsFeedback(`Imported ${result.importedEvents} event${result.importedEvents === 1 ? "" : "s"} into ${result.updatedWeeks.length} week${result.updatedWeeks.length === 1 ? "" : "s"} and updated ${result.importedDays} weekday slot${result.importedDays === 1 ? "" : "s"}. Notes like "(Jane covering)" are merged into the day's note field.${skippedLabel}${duplicateLabel}${weekendLabel}${nonTeamLabel}`);
-        setIcsFeedbackTone(result.skippedEvents.length > 0 || result.duplicateDaysSkipped > 0 ? "warn" : "success");
+        setPreviewFileName(file.name || "");
+        setPreviewData(preview);
       }
     } catch (err) {
-      setIcsFeedback("Calendar import failed. Make sure the file is a valid Outlook .csv or .ics export.");
+      setIcsFeedback("Could not read this file. Make sure it's a valid Outlook .csv or .ics export.");
       setIcsFeedbackTone("error");
-      console.error("ONN Scheduler ICS import error:", err);
+      console.error("ONN Scheduler ICS preview error:", err);
     } finally {
       setImportingIcs(false);
       e.target.value = "";
     }
+  };
+  const handleApplyPreview = async (editedEntries) => {
+    setPreviewBusy(true);
+    try {
+      const result = await applyOutlookPreviewEntries(editedEntries, teamList);
+      if (typeof onIcsImport === "function") {
+        await onIcsImport(result);
+      }
+      const dupLabel = result.duplicateDaysSkipped > 0 ? ` Ignored ${result.duplicateDaysSkipped} duplicate slot${result.duplicateDaysSkipped === 1 ? "" : "s"}.` : "";
+      setIcsFeedback(`Imported ${result.importedDays} day-slot${result.importedDays === 1 ? "" : "s"} across ${result.updatedWeeks.length} week${result.updatedWeeks.length === 1 ? "" : "s"}. Notes like "(Jane covering)" are merged into the day's note field.${dupLabel}`);
+      setIcsFeedbackTone("success");
+      setPreviewData(null);
+      setPreviewFileName("");
+    } catch (err) {
+      setIcsFeedback("Import failed: " + (err && err.message ? err.message : "unknown error"));
+      setIcsFeedbackTone("error");
+      console.error("ONN Scheduler ICS apply error:", err);
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  const handleCancelPreview = () => {
+    setPreviewData(null);
+    setPreviewFileName("");
   };
   const handleReset = async () => {
     try {
@@ -6162,7 +6516,14 @@ function SettingsModal({
     color: t.textMuted,
     marginTop: "2px"
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement(React.Fragment, null, previewData && /*#__PURE__*/React.createElement(OutlookImportPreview, {
+    preview: previewData,
+    teamList,
+    fileName: previewFileName,
+    busy: previewBusy,
+    onApply: handleApplyPreview,
+    onCancel: handleCancelPreview
+  }), /*#__PURE__*/React.createElement("div", {
     style: overlayStyle
   }, /*#__PURE__*/React.createElement("div", {
     style: boxStyle
@@ -6598,7 +6959,7 @@ function SettingsModal({
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, tab === "settings" ? "Save" : "Close"))))));
+  }, tab === "settings" ? "Save" : "Close")))))));
 }
 function AuthShell({
   children
