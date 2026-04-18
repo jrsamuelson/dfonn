@@ -11,6 +11,7 @@ const EXACT_KEYS = new Set([
   "onn_team_nextid_v1",
   "onn_team_v2",
   "onn_settings_v1",
+  "onn_vacation_index_v1",
 ]);
 const WEEK_KEY_RE = /^onn_week5_\d{4}-\d{2}-\d{2}$/;
 const WEEK_LOCK_KEY_RE = /^onn_week5_lock_\d{4}-\d{2}-\d{2}$/;

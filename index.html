@@ -961,7 +961,13 @@ async function loadVacationCarryoverIndex(teamOnns = ONNs, {
       return vacationCarryoverIndexCache;
     }
   }
-  const stored = normalizeVacationCarryoverIndex(await StorageAdapter.get(VACATION_INDEX_KEY));
+  let raw = null;
+  try {
+    raw = await StorageAdapter.get(VACATION_INDEX_KEY);
+  } catch (err) {
+    console.warn("ONN Scheduler vacation carryover index load failed (continuing):", err);
+  }
+  const stored = normalizeVacationCarryoverIndex(raw);
   if (stored) {
     vacationCarryoverIndexCache = stored;
     return stored;
