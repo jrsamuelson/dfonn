@@ -1482,7 +1482,17 @@ function getDayNameForDate(date) {
 function getOutlookNameVariants(onn) {
   const builtInAliases = OUTLOOK_NAME_ALIASES[String(onn?.name || "").trim()] || [];
   const configuredAliases = Array.isArray(onn?.aliases) ? onn.aliases : [];
-  return Array.from(new Set([onn?.name, ...builtInAliases, ...configuredAliases].map(value => String(value || "").trim()).filter(Boolean)));
+  const fullName = String(onn?.name || "").trim();
+  // Auto-derive the first-name token and last-name token as aliases when the
+  // team has multi-word names. Most Outlook calendar entries use the first
+  // name only (e.g. "Kathy LW" for team member "Kathy Lynch").
+  const autoAliases = [];
+  if (/\s/.test(fullName)) {
+    const parts = fullName.split(/\s+/);
+    if (parts[0]) autoAliases.push(parts[0]);
+    if (parts.length > 1 && parts[parts.length - 1]) autoAliases.push(parts[parts.length - 1]);
+  }
+  return Array.from(new Set([fullName, ...builtInAliases, ...configuredAliases, ...autoAliases].map(value => String(value || "").trim()).filter(Boolean)));
 }
 function getOutlookStatusMentions(rawStatus) {
   const cleaned = String(rawStatus || "").replace(/^[\s\-:/|]+/, "").replace(/[_/|-]+/g, " ").replace(/\s+/g, " ").trim();
@@ -2671,7 +2681,7 @@ function IncomingCoverageBadges({
 
 function CaretIcon({
   open = false,
-  size = 10
+  size = 14
 }) {
   return /*#__PURE__*/React.createElement("svg", {
     viewBox: "0 0 12 12",
@@ -6379,18 +6389,7 @@ function SettingsModal({
     style: settingLabel
   }, "Outlook calendar import"), /*#__PURE__*/React.createElement("div", {
     style: settingDesc
-  }, "Upload an Outlook .csv or .ics export with event titles like Alex LW, Ann WFH, or Nooni Vacation."), icsFeedback && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: "10px",
-      fontSize: "11px",
-      lineHeight: 1.45,
-      color: icsFeedbackTone === "error" ? t.dangerText : icsFeedbackTone === "warn" ? t.warnText : t.successText,
-      background: icsFeedbackTone === "error" ? t.dangerSoft : icsFeedbackTone === "warn" ? t.warnSoft : t.successSoft,
-      border: `1px solid ${icsFeedbackTone === "error" ? t.dangerBorder : icsFeedbackTone === "warn" ? t.warnBorder : t.successBorder}`,
-      borderRadius: "12px",
-      padding: "8px 10px"
-    }
-  }, icsFeedback)), /*#__PURE__*/React.createElement("div", {
+  }, "Upload an Outlook .csv or .ics export with event titles like Alex LW, Ann WFH, or Nooni Vacation.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: "8px",
@@ -6419,7 +6418,19 @@ function SettingsModal({
       fontWeight: 600,
       cursor: importingIcs ? "default" : "pointer"
     }
-  }, importingIcs ? "Importing…" : "Import Outlook file"))), /*#__PURE__*/React.createElement("div", {
+  }, importingIcs ? "Importing…" : "Import Outlook file"))), icsFeedback && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: "-6px",
+      marginBottom: "4px",
+      fontSize: "11px",
+      lineHeight: 1.45,
+      color: icsFeedbackTone === "error" ? t.dangerText : icsFeedbackTone === "warn" ? t.warnText : t.successText,
+      background: icsFeedbackTone === "error" ? t.dangerSoft : icsFeedbackTone === "warn" ? t.warnSoft : t.successSoft,
+      border: `1px solid ${icsFeedbackTone === "error" ? t.dangerBorder : icsFeedbackTone === "warn" ? t.warnBorder : t.successBorder}`,
+      borderRadius: "10px",
+      padding: "8px 12px"
+    }
+  }, icsFeedback), /*#__PURE__*/React.createElement("div", {
     style: settingRow
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: settingLabel
